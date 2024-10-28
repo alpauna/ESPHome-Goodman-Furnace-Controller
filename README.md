@@ -1,4 +1,7 @@
 # ESPHome Goodman Funace Controller
+## well thats funny
+Um.. should be called furnance not funace but you get the idea... Maybe I will fix it at sometime but this seems difficult to fix at this point. Anyway this was FUN to build so the name fits! Actually, it was way crazy but working from home I am sick of hearing the old controller relays. This board uses triacs to accomplish what the old relays did. 
+## Info
  This is the current ESPHome code and support for my Goodman Furnace Controller. 
  I have a blog on this [here](https://alshowto.com/esp32-s3-climatefurnace-controller/)
  ![Version 1 board](pictures/FurnaceControllerVersion1.jpg)
