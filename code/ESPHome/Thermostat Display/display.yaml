@@ -1,0 +1,1711 @@
+esphome:
+  name: display
+  friendly_name: display
+  platformio_options: 
+    build_flags: "-DBOARD_HAS_PSRAM"
+    board_build.esp-idf.memory_type: qio_opi
+    board_build.flash_mode: dio
+  
+
+esp32:
+  board: esp32s3box
+  framework:
+    type: esp-idf
+    sdkconfig_options: 
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: y
+      CONFIG_ESP32S3_DATA_CACHE_64KB: y
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
+      CONFIG_SPIRAM_RODATA: y
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+# Enable logging
+logger:
+  level: INFO
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret therm_display_api_key
+
+ota:
+  - platform: esphome
+    password: !secret therm_display_ota_pass
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Display Fallback Hotspot"
+    password: !secret therm_display_ap_pass
+
+captive_portal:
+
+font:
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: icons_100
+    size: 100
+    bpp: 4
+    glyphs: [
+      "\U000F0594", # clear-night
+      "\U000F0590", # cloudy
+      "\U000F0F2F", # exceptional
+      "\U000F0591", # fog
+      "\U000F0592", # hail
+      "\U000F0593", # lightning
+      "\U000F067E", # lightning-rainy
+      "\U000F0595", # partlycloudy
+      "\U000F0596", # pouring
+      "\U000F0597", # rainy
+      "\U000F0598", # snowy
+      "\U000F067F", # snowy-rainy
+      "\U000F0599", # sunny
+      "\U000F059D", # windy
+      "\U000F059E", # windy-variant
+      "\U000F14E4", # sunny-off
+      ]
+
+time:
+  - platform: homeassistant
+    id: ha_time
+    timezone: "America/Chicago"
+    # repeated synchronization is not necessary unless the external RTC
+    # is much more accurate than the internal clock
+    #update_interval: 60m
+    on_time:
+      # Every 5 minutes
+      - seconds: 0
+        minutes: /1
+        then:
+          - lvgl.label.update:
+              id: lbl_date
+              text:
+                time_format: "%a %Y-%m-%d %I:%M %p"
+                time: ha_time
+              #  format: "%s"
+              #  args: [ 'id(ha_time).now().strftime("%a %Y-%m-%d %I:%M %p").c_str()' ] 
+              #  !lambda id(ha_time).now().strftime("%Y-%m-%d %h:%M %p");
+      - hours: 2,3,4,5
+        minutes: 5
+        seconds: 0
+        then:
+          - switch.turn_on: switch_antiburn
+      - hours: 2,3,4,5
+        minutes: 35
+        seconds: 0
+        then:
+          - switch.turn_off: switch_antiburn
+
+sensor:
+
+  - platform: htu21d
+    model: htu21d
+    temperature:
+      id: local_temp
+      name: "Thermostat Temperature"
+      on_value:
+        - lvgl.label.update:
+            id: lbl_loc_temp
+            text:
+              format: "%.1f °F"
+              args: [ 'celsius_to_fahrenheit(x)' ]
+    humidity:
+      id: local_hum
+      name: "Thermostat Humidity"
+      on_value:
+        - lvgl.label.update:
+            id: lbl_loc_hum
+            text:
+              format: "%.1f %%"
+              args: [ 'x' ]
+    heater:
+      id: local_heater
+      name: "Heater"
+    update_interval: 30s
+
+  - platform: homeassistant
+    id: current_living_temperature
+    entity_id: sensor.average_home_temperature
+    on_value:
+        - lvgl.label.update:
+            id: current_temp
+            text:
+              format: "%.1f °F"
+              args: [ 'x' ]
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+    
+  - platform: homeassistant
+    id: current_ds_lr_temp
+    entity_id: sensor.downstairs_lr_dht_downstairs_livingroom_temperature
+    
+  - platform: homeassistant
+    id: current_ds_hall_temp
+    entity_id: sensor.m5stack_atom_echo_889034_downstairs_hall_temperature
+          
+  - platform: homeassistant
+    id: target_temp_high
+    entity_id: climate.therm_master_thermostat_climate_controller 
+    attribute: target_temp_high
+    on_value:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.indicator.update:
+            id: val_cool
+            value: !lambda return id(target_temp_high).state;
+        - lvgl.arc.update:
+            id: cooler
+            value: !lambda return id(target_temp_high).state;
+        - lvgl.spinbox.update:
+            id: cool_temp
+            value: !lambda return x * 10;
+  - platform: homeassistant
+    id: target_temp_low
+    entity_id: climate.therm_master_thermostat_climate_controller 
+    attribute: target_temp_low
+    on_value:
+      then:
+        - script.execute: 
+                  id: resume_display
+                  bright_dis: 50
+                  bright_en: 100
+        - lvgl.indicator.update:
+            id: val_heat
+            value: !lambda return id(target_temp_low).state;
+        - lvgl.arc.update:
+            id: heater
+            value: !lambda return id(target_temp_low).state;
+            
+        - lvgl.spinbox.update:
+            id: heat_temp
+            value: !lambda return id(target_temp_low).state * 10;
+  - platform: homeassistant
+    id: ha_weather_temp
+    entity_id: weather.kfsd 
+    attribute: temperature
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_weather_forecast_tempap
+            text: 
+              format: "%.1f °F"
+              args: [ 'id(ha_weather_temp).state' ]
+
+    
+ 
+        
+text:
+  - platform: lvgl
+    id: fr_cond_icon
+    name: fr_cond_icon
+    widget: lbl_weather_forecast_condition_icon
+    mode: text
+  - platform: lvgl
+    id: fr_cond_name
+    name: fr_cond_name
+    widget: lbl_weather_forecast_condition_name
+    mode: text
+  - platform: lvgl
+    id: fr_tempap
+    name: fr_tempap
+    widget: lbl_weather_forecast_tempap
+    mode: text
+  - platform: lvgl
+    id: fr_temphi
+    name: fr_temphi
+    widget: lbl_weather_forecast_temphi
+    mode: text
+  - platform: lvgl
+    id: fr_templo
+    name: fr_templo
+    widget: lbl_weather_forecast_templo
+    mode: text
+  - platform: lvgl
+    id: wd_out_now
+    name: wd_out_now
+    widget: lbl_weather_outdnoor_now
+    mode: text
+text_sensor:
+  - platform: homeassistant
+    id: therm_cur_mode
+    entity_id: climate.therm_master_thermostat_climate_controller
+    filters:
+      - map:
+          - off -> 0
+          - heat_cool -> 1
+          - heat -> 2
+          - cool -> 3
+          - fan_only -> 4
+    on_value:
+      then:
+        - script.execute: 
+                  id: resume_display
+                  bright_dis: 50
+                  bright_en: 100
+        - select.set_index:
+            id: current_mode
+            index: !lambda |-
+              auto index = parse_number<int>(x); 
+              if (index.has_value()) {
+                ESP_LOGI("main", "'%s' is at index: %d", x.c_str(), index.value());
+                return int(index.value());
+              } else {
+                ESP_LOGE("main", "There is no option '%s' need to update options on climate display!", x.c_str());
+                return 0;
+              }
+  - platform: homeassistant
+    id: current_hvac_action
+    entity_id: climate.therm_master_thermostat_climate_controller
+    attribute: hvac_action
+    on_value:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.label.update:
+            id: lbl_state
+            text: !lambda |-
+              auto str_current_state = id(current_hvac_action).state.c_str();
+              auto index = id(climate_state).index_of(str_current_state);
+              if (index.has_value()) {
+                auto call = id(climate_state).make_call();
+                call.set_index(index.value());
+                call.perform();
+                ESP_LOGI("main", "'%s' is at index: %d", str_current_state, index.value());
+                return id(climate_state).state.c_str();
+              } else {
+                auto call = id(climate_state).make_call();
+                call.set_index(0);
+                call.perform();
+                ESP_LOGI("main", "'%s' is at index: %d", str_current_state, index.value());
+                return id(climate_state).state.c_str();
+              }  
+  - platform: homeassistant
+    id: ha_wheather_forcast
+    entity_id: weather.kfsd
+    filters:
+      - lambda: |-
+          if (x == "clear-night") {
+            return std::string("\U000F0594");
+          } else if(x == "cloudy"){
+            return std::string("\U000F0590");
+          } else if(x == "exceptional"){
+            return std::string("\U000F0F2F");
+          } else if(x == "fog"){
+            return std::string("\U000F0591");
+          } else if(x == "hail"){
+            return std::string("\U000F0592");
+          } else if(x == "lightning"){
+            return std::string("\U000F0593");
+          } else if(x == "lightning-rainy"){
+            return std::string("\U000F067E");
+          } else if(x == "partlycloudy"){
+            return std::string("\U000F0595");
+          } else if(x == "pouring"){
+            return std::string("\U000F0596");
+          } else if(x == "rainy"){
+            return std::string("\U000F0597");
+          } else if(x == "snowy"){
+            return std::string("\U000F0598");
+          } else if(x == "snowy-rainy"){
+            return std::string("\U000F067F");
+          } else if(x == "sunny"){
+            return std::string("\U000F0599");
+          } else if(x == "windy"){
+            return std::string("\U000F059D");
+          } else if(x == "windy-variant"){
+            return std::string("\U000F059E");
+          } else if(x == "sunny-off"){
+            return std::string("\U000F14E4");
+          } else {
+            return std::string("\U000F14E4");
+          }
+      
+    on_value:
+      then:
+        - logger.log:
+            format: "weather state is: '%s'"
+            args: [ "x.c_str()" ]  
+
+        - text.set:
+            id: fr_cond_icon
+            value: !lambda return x.c_str();
+  - platform: homeassistant
+    id: ha_wheather_forcast_text
+    entity_id: weather.kfsd
+    filters:
+      - map:
+        - clear-night -> Clear Night
+        - cloudy -> Cloudy
+        - exceptional -> Exceptional
+        - fog -> Fog
+        - hail -> Hail
+        - lightning -> Lightning
+        - lightning-rainy -> Lightning rainy
+        - partlycloudy -> Partly Cloudy
+        - pouring -> Pouring
+        - rainy -> Rainy
+        - snowy -> Snowy
+        - snowy-rainy -> Snow showers
+        - sunny -> Sunny
+        - windy -> Windy
+        - windy-variant -> Windy cloudy
+        - sunny-off -> Sunny Off
+        - unknown -> Unknown
+        - unavailable -> Unavailable
+    on_value:
+      then:
+        - logger.log:
+            format: "weather state is: '%s'"
+            args: [ "x.c_str()" ]  
+
+        - text.set:
+            id: fr_cond_name
+            value: !lambda return x.c_str();
+binary_sensor:
+  - platform: status
+    name: Status sensor
+
+  - platform: homeassistant
+    id: term_fan_state
+    entity_id: switch.therm_master_fan
+    on_press:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: fan_led
+            brightness: 100%
+    on_release: 
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: fan_led
+            brightness: 0%
+  - platform: homeassistant
+    id: term_demand_state
+    entity_id: switch.therm_master_reversing_valve
+    on_press:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: dem_led
+            brightness: 100%
+    on_release: 
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: dem_led
+            brightness: 0%
+  - platform: homeassistant
+    id: term_cool1_state
+    entity_id: switch.therm_master_call_compressor
+    on_press:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: cool1_led
+            brightness: 100%
+    on_release: 
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: cool1_led
+            brightness: 0%
+        
+  - platform: homeassistant
+    id: term_cool2_state
+    entity_id: switch.therm_master_call_compressor_2
+    on_press:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: cool2_led
+            brightness: 100%
+    on_release: 
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: cool2_led
+            brightness: 0%
+  - platform: homeassistant
+    id: term_heat1_state
+    entity_id: switch.therm_master_heat_low
+    on_press:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: heat1_led
+            brightness: 100%
+    on_release: 
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: heat1_led
+            brightness: 0%
+  - platform: homeassistant
+    id: term_heat2_state
+    entity_id: switch.therm_master_heat_high
+    on_press:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: heat2_led
+            brightness: 100%
+    on_release: 
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: heat2_led
+            brightness: 0%
+  - platform: homeassistant
+    id: term_outside_state
+    entity_id: binary_sensor.therm_master_outside_temp_status
+    on_press:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: outside_temp_led
+            brightness: 100%
+    on_release: 
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: outside_temp_led
+            brightness: 0%
+  - platform: homeassistant
+    id: term_defrost_state
+    entity_id: binary_sensor.therm_master_defrost_mode
+    on_press:
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: defrost_led
+            brightness: 100%
+    on_release: 
+      then:
+        - script.execute: 
+            id: resume_display
+            bright_dis: 50
+            bright_en: 100
+        - lvgl.led.update:
+            id: defrost_led
+            brightness: 0%
+
+select:
+  - platform: template
+    id: sel_pages
+    options:
+      - "Home"
+      - "Advance"
+      - "Weather Forcast"
+    initial_option: "Home"
+    optimistic: True
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_header
+            text: 
+              format: "%s Page: %d of %d"
+              args: ["x.c_str()", "i+1", "id(sel_pages).size()" ]
+        - if:
+            condition:
+              lambda: "return int(i) == 0;"
+            then:
+              - script.execute: check_leds  
+                  
+
+  - platform: template
+    id: climate_state
+    options:
+      - "off"
+      - "heating"
+      - "cooling"
+      - "idle"
+      - "fan"
+
+    initial_option: "off"
+    optimistic: True
+  - platform: template
+    id: climate_current_mode
+    options:
+      - "off"
+      - "heat_cool"
+      - "heat"
+      - "cool"
+      - "fan_only"
+    initial_option: "off"
+    optimistic: True
+
+  - platform: lvgl
+    id: current_mode
+    widget: mode_dropdown 
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(mode_changed).state > 0 && id(target_temp_low).state > 0;'
+            then:
+              - number.set:
+                  id: cool_temp_changed
+                  value: 0
+              - select.set_index:
+                  id: climate_current_mode
+                  index: !lambda return int(id(current_mode).active_index().value());
+
+              - homeassistant.action:
+                  action: climate.set_temperature
+                  data:
+                    target_temp_low: !lambda return id(target_temp_low).state;
+                    target_temp_high: !lambda return id(target_temp_high).state;
+                    hvac_mode: !lambda return id(climate_current_mode).state;
+                    entity_id: climate.therm_master_thermostat_climate_controller 
+              
+
+number:
+  - platform: template
+    id: gap_clicked
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    optimistic: True
+  - platform: template
+    id: gap_changed
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    optimistic: True
+  - platform: template
+    id: heat_temp_clicked
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    optimistic: True
+  - platform: template
+    id: heat_temp_changed
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    optimistic: True
+  - platform: template
+    id: cool_temp_clicked
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    optimistic: True
+  - platform: template
+    id: cool_temp_changed
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    optimistic: True
+
+  - platform: template
+    id: mode_changed
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    optimistic: True
+
+  - platform: template
+    id: display_timeout
+    name: "Display Timeout(Min)"
+    initial_value: 0.5
+    min_value: 0.5
+    max_value: 20
+    step: 0.5
+    optimistic: True
+  
+  - platform: lvgl
+    widget: heat_temp
+    name: Heat Temp Spinner
+    on_value:
+      then:
+        - logger.log:
+                  format: "Heat Temp pre is: %.1f temp_changed = %d temp_clicked=%d"
+                  args: [ "x", "int(id(heat_temp_changed).state)", "int(id(heat_temp_clicked).state)" ]  
+        - if:
+            condition:
+              lambda: 'return (id(heat_temp_changed).state > 0 &&  id(heat_temp_clicked).state > 0) || id(heat_temp_clicked).state == 0;'
+            then:
+              - logger.log:
+                  format: "Heat Temp is: %.1f"
+                  args: [ 'x' ]  
+              - homeassistant.action:
+                  action: climate.set_temperature
+                  data:
+                    target_temp_low: !lambda return x;
+                    target_temp_high: !lambda return id(target_temp_high).state;
+                    entity_id: climate.therm_master_thermostat_climate_controller
+              - number.set:
+                  id: heat_temp_changed
+                  value: 0
+              - number.set:
+                  id: heat_temp_clicked
+                  value: 0
+  - platform: lvgl
+    widget: cool_temp
+    name: Cool Temp Spinner
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return (id(cool_temp_changed).state > 0 &&  id(cool_temp_clicked).state > 0) || id(cool_temp_clicked).state == 0;'
+            then:
+              - logger.log:
+                  format: "Cool Temp is: %.1f"
+                  args: [ 'x' ]  
+              - homeassistant.action:
+                  action: climate.set_temperature
+                  data:
+                    target_temp_low: !lambda return id(target_temp_low).state;
+                    target_temp_high: !lambda return x;
+                    entity_id: climate.therm_master_thermostat_climate_controller 
+              - number.set:
+                  id: cool_temp_changed
+                  value: 0
+              - number.set:
+                  id: cool_temp_clicked
+                  value: 0
+        
+output:
+  - platform: ledc
+    pin: 2
+    frequency: 1220
+    id: gpio_backlight_pwm
+
+light:
+  - platform: monochromatic # Define a monochromatic, dimmable light for the backlight
+    output: gpio_backlight_pwm
+    name: ${device_name} Display Backlight
+    id: back_light
+    restore_mode: ALWAYS_ON
+
+switch:
+  - platform: template
+    name: Antiburn
+    id: switch_antiburn
+    icon: mdi:television-shimmer
+    optimistic: true
+    entity_category: "config"
+    turn_on_action:
+      - logger.log: "Starting Antiburn"
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - delay: 1s
+      - lvgl.pause:
+          show_snow: true
+    turn_off_action:
+      - logger.log: "Stopping Antiburn"
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - delay: 1s
+            - lvgl.pause:
+
+display:
+  - platform: rpi_dpi_rgb
+    id: main_display
+    color_order: RGB
+    invert_colors: True
+    update_interval: never
+    auto_clear_enabled: false # takes 2.8 seconds to clear the display
+    dimensions:
+      width: 800
+      height: 480
+    de_pin: 40
+    hsync_pin: 39
+    vsync_pin: 41
+    pclk_pin: 0
+    pclk_frequency: 12MHz
+    data_pins:
+      red:
+        - 45        #r1
+        - 48        #r2
+        - 47        #r3
+        - 21        #r4
+        - 14        #r5
+      green:
+        - 5         #g0
+        - 6         #g1
+        - 7         #g2
+        - 15        #g3
+        - 16        #g4
+        - 4         #g5
+      blue:
+        - 8         #b1
+        - 3         #b2
+        - 46        #b3
+        - 9         #b4
+        - 1         #b5
+
+i2c:
+  sda: GPIO19
+  scl: GPIO20
+  scan: true
+
+touchscreen:
+  platform: gt911
+  on_release:
+      then:
+        - if:
+            condition: lvgl.is_paused
+            then:
+              - script.execute: 
+                  id: resume_display
+                  bright_dis: 50
+                  bright_en: 100
+
+script:
+  - id: resume_display
+    mode: restart
+    parameters: 
+      bright_dis: int
+      bright_en: int
+    then:
+      - lvgl.resume:
+      - lvgl.widget.redraw:
+      - logger.log: "LVGL resuming"
+      - if: 
+          condition: lvgl.is_paused
+          then:
+            - light.turn_on: 
+                id: back_light
+                brightness: !lambda return bright_dis * .01;
+          else:
+            - light.turn_on: 
+                id: back_light
+                brightness: !lambda return bright_en * .01;
+      - lvgl.label.update:
+          id: lbl_date
+          text:
+            time_format: "%a %Y-%m-%d %I:%M %p"
+            time: ha_time
+  - id: check_leds
+    mode: restart
+    then:
+      - if:
+          condition:
+            # Same syntax for is_off
+            binary_sensor.is_on: term_outside_state
+          then:
+            - lvgl.led.update:
+                id: outside_temp_led
+                brightness: 100%
+          else:
+            - lvgl.led.update:
+                id: outside_temp_led
+                brightness: 0%
+
+image:
+  - file: images/CoolOnly.png
+    id: coolIcon
+    resize: 50x50
+  - file: images/HeatOnly.png
+    id: heatIcon
+    resize: 50x50
+  - file: images/HeatAndCool.png
+    id: heatAndCoolIcon
+    resize: 50x50
+
+lvgl:
+  on_idle:
+    - timeout: 30s
+      then:
+        - if:
+            condition:
+              lambda: 'return id(sel_pages).active_index() > 0;'
+            then:
+              - lvgl.page.show: main_page
+              - select.first: sel_pages
+    - timeout: !lambda "return (id(display_timeout).state * 60000);"
+      then:
+        - logger.log: 
+            format: "LVGL is idle"
+            level: INFO
+        - light.turn_on: 
+            id: back_light
+            brightness: 15%
+        - lvgl.pause:
+
+  color_depth: 16
+  bg_color: 0
+  border_width: 0
+  outline_width: 0
+  shadow_width: 0
+  text_font: unscii_16
+  align: center
+  style_definitions:
+    - id: weather_icon
+      text_font: icons_100
+      text_align: CENTER
+      text_color: 0x33B533
+      bg_opa: TRANSP
+      bg_color: 0
+      radius: 4
+    - id: meter_style
+      border_width: 0
+      outline_width: 0
+      align: center
+      bg_color: 0
+    - id: title_style
+      text_font: MONTSERRAT_40
+      align: center
+      text_color: 0xFFFFFF
+      bg_opa: TRANSP
+      bg_color: 0
+      radius: 4
+      pad_all: 2
+    - id: label_style
+      text_font: MONTSERRAT_20
+      align: center
+      text_color: 0x33B533
+      bg_opa: TRANSP
+      bg_color: 0
+      radius: 4
+      pad_all: 2
+    - id: detail_style
+      text_font: MONTSERRAT_18
+      align: center
+      text_color: 0xFFFFFF
+      bg_opa: TRANSP
+      bg_color: 0
+      radius: 4
+      pad_all: 2
+    - id: cool_style
+      opa: cover
+    - id: header_footer
+      bg_color: 0x2F8CD8
+      bg_grad_color: 0x005782
+      bg_grad_dir: VER
+      bg_opa: COVER
+      border_opa: TRANSP
+      radius: 0
+      pad_all: 0
+      pad_row: 0
+      pad_column: 0
+      border_color: 0x0077b3
+      text_color: 0xFFFFFF
+      width: 100%
+      height: 30
+  top_layer:
+    widgets:
+      - obj:
+            align: TOP_MID
+            styles: header_footer
+            widgets:
+              - label:
+                  text: "Home"
+                  id: lbl_header
+                  align: CENTER
+                  text_align: CENTER
+                  text_color: 0xFFFFFF
+              - label:
+                  text: ""
+                  id: lbl_date
+                  styles: label_style
+                  align: TOP_RIGHT
+                  text_align: center
+                  text_color: 0xFFFFFF
+      - buttonmatrix:
+          align: bottom_mid
+          styles: header_footer
+          pad_all: 0
+          outline_width: 0
+          id: top_layer
+          items:
+            styles: header_footer
+          rows:
+            - buttons:
+              - id: page_prev
+                text: "\uF053"
+                on_press:
+                  then:
+                    - lvgl.page.previous:
+              - id: page_home
+                text: "\uF015"
+                on_press:
+                  then:
+                    - lvgl.page.show: main_page
+                    
+              - id: page_next
+                text: "\uF054"
+                on_press:
+                  then:
+                    - lvgl.page.next:
+  pages:
+    - id: main_page
+      on_load:
+        - select.set_index: 
+            id: sel_pages
+            index: 0
+        
+      widgets:
+        - obj:
+            layout:
+              type: flex
+              pad_row: 4
+              pad_column: 4px
+              flex_flow: COLUMN_WRAP
+              flex_align_cross: CENTER
+            y: 40
+            x: 0
+            pad_all: 3
+            height: 90%
+            width: 260
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            align: TOP_LEFT
+            widgets:
+              - label:
+                  width: 200
+                  styles: label_style
+                  align: TOP_LEFT
+                  text: "Heat Temp:"
+              - obj:
+                  height: 50
+                  width: 200
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  align: CENTER
+                  pad_all: 2
+                  widgets:
+                    - button:
+                        align: BOTTOM_LEFT
+                        width: 30
+                        height: 40
+                        id: btn_low_dwn
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "-"
+                        on_click:
+                          then:
+                            - lvgl.widget.focus: heat_temp
+                            - lvgl.spinbox.decrement: heat_temp
+                            - number.set:
+                                id: heat_temp_clicked
+                                value: 1
+                        on_long_press_repeat:
+                          then:
+                            - lvgl.spinbox.decrement: heat_temp
+                        on_release:
+                          then:
+                            - number.set:
+                                id: heat_temp_changed
+                                value: 1
+                    - spinbox:
+                        id: heat_temp
+                        align: CENTER
+                        bg_opa: TRANSP
+                        step: 0.1
+                        digits: 3
+                        styles: detail_style
+                        range_from: 55.0
+                        range_to: 85.0
+                        decimal_places: 1
+                        value: 720.0
+                    - button:
+                        align: BOTTOM_RIGHT
+                        width: 30
+                        height: 40
+                        id: btn_low_up
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "+"
+                        on_click:
+                          then:
+                            - lvgl.widget.focus: heat_temp
+                            - lvgl.spinbox.increment: heat_temp
+                            - number.set:
+                                id: heat_temp_clicked
+                                value: 1
+                            
+                        on_long_press_repeat:
+                          then:
+                            - lvgl.spinbox.increment: heat_temp
+                        on_release:
+                          then:
+                            - number.set:
+                                id: heat_temp_changed
+                                value: 1
+              - label:
+                  width: 200
+                  styles: label_style
+                  align: TOP_LEFT
+                  text: "Cool Temp:"                        
+              - obj:
+                  height: 50
+                  width: 200
+                  styles: detail_style
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  pad_all: 2
+                  align: CENTER
+                  widgets:
+                    - button:
+                        align: BOTTOM_LEFT
+                        width: 30
+                        height: 40
+                        id: btn_ct_dwn
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "-"
+                        on_click:
+                          then:
+                            - lvgl.widget.focus: cool_temp
+                            - lvgl.spinbox.decrement: cool_temp
+                            - number.set:
+                                id: cool_temp_clicked
+                                value: 1
+                        on_long_press_repeat:
+                          then:
+                            - lvgl.spinbox.decrement: cool_temp
+                        on_release:
+                          then:
+                            - number.set:
+                                id: cool_temp_changed
+                                value: 1
+                    - spinbox:
+                        id: cool_temp
+                        align: center
+                        step: 0.1
+                        digits: 3
+                        styles: detail_style
+                        range_from: 55.0
+                        range_to: 85.0
+                        decimal_places: 1
+                        bg_opa: TRANSP
+                        value: 720.0
+                    - button:
+                        align: BOTTOM_RIGHT
+                        width: 30
+                        height: 40
+                        id: btn_ct_up
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "+"
+                        on_click:
+                          then:
+                            - lvgl.widget.focus: cool_temp
+                            - lvgl.spinbox.increment: cool_temp
+                            - number.set:
+                                id: cool_temp_clicked
+                                value: 1
+                            
+                        on_long_press_repeat:
+                          then:
+                            - lvgl.spinbox.increment: cool_temp
+                        on_release:
+                          then:
+                            - number.set:
+                                id: cool_temp_changed
+                                value: 1
+              - label:
+                  width: 200
+                  styles: label_style
+                  align: TOP_LEFT
+                  text: "Mode:" 
+              - dropdown:
+                  id: mode_dropdown
+                  width: 200
+                  styles: detail_style
+                  align: TOP_LEFT
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  options:
+                    - "Off"
+                    - "Heat/Cool"
+                    - "Heat"
+                    - "Cool"
+                    - "Fan"
+                  on_release:
+                    then:
+                      - number.set:
+                          id: mode_changed
+                          value: 1
+              - label:
+                  width: 200
+                  styles: label_style
+                  align: TOP_LEFT
+                  text: "Temp Here:"
+              - label:
+                  id: lbl_loc_temp
+                  width: 200
+                  styles: detail_style
+                  align: TOP_LEFT
+                  text: 
+                    format: "%.1f °F"
+                    args: ["NAN"]
+              - label:
+                  width: 200
+                  styles: label_style
+                  align: TOP_LEFT
+                  text: "Humidity Here:"
+              - label:
+                  id: lbl_loc_hum
+                  width: 200
+                  styles: detail_style
+                  align: TOP_LEFT
+                  text:
+                    format: "%.1f %%"
+                    args: ["NAN"]
+               
+        
+        
+        - obj: # Meter
+            height: 360
+            width: 360
+            bg_color: 0
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            pad_all: 4
+            align: CENTER
+            widgets:
+              - meter:
+                  height: 80%
+                  width: 80%
+                  border_width: 0
+                  bg_opa: TRANSP
+                  align: center
+                  scales:
+                    - range_from: 55
+                      range_to: 85
+                      angle_range: 260 # sets the total angle to 180 = starts mid left and ends mid right
+                      ticks:
+                        count: 0
+                      indicators:
+                        - line:
+                            id: val_needle
+                            width: 4
+                            color: 0xFFFF00
+                            r_mod: 20 # sets line length by this much difference from the scale default radius
+                            value: 72
+                        - line:
+                            id: val_cool
+                            color: 0x0000FF
+                            width: 6
+                            r_mod: 4 # sets line length by this much difference from the scale default radius
+                            value: 72
+                        - line:
+                            id: val_heat
+                            color: 0x8A2D52
+                            width: 6
+                            r_mod: 10 # sets line length by this much difference from the scale default radius
+                            value: 72
+                        - arc: # first half of the scale background
+                            color: 0xFF44A1
+                            id: heater
+                            r_mod: 10 # radius difference from the scale default radius
+                            width: 31
+                            start_value: 55
+                            end_value: 72
+                            
+                        - arc: # second half of the scale background
+                            color: 0x9BDDFF
+                            id: cooler
+                            r_mod: 10
+                            width: 31
+                            start_value: 72
+                            end_value: 85
+              - arc: # black arc to erase middle part of meter indicator line
+                  height: 190
+                  width: 190
+                  align: center
+                  arc_color: 0x000000
+                  arc_width: 150
+                  start_angle: 0
+                  end_angle: 360
+                  indicator:
+                    arc_width: 150
+                    arc_color: 0x000000
+              - label: # gauge lower and higher range indicators
+                  styles: detail_style
+                  y: 90
+                  x: -95
+                  text: "55"
+              - label:
+                  styles: detail_style
+                  y: 90
+                  x: 95
+                  text: "85"
+              - label:  # value label
+                  styles: title_style
+                  id: current_temp
+                  y: -10
+              - label:  # value label
+                  styles: title_style
+                  id: lbl_state
+                  align: BOTTOM_MID
+              
+        - obj:
+            layout:
+              type: flex
+              pad_row: 1
+              pad_column: 1px
+              flex_flow: COLUMN_WRAP
+              flex_align_cross: CENTER
+            y: 35
+            x: 560
+            pad_all: 3
+            height: 90%
+            width: 230
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            align: TOP_LEFT
+            widgets:
+              - obj:
+                  height: 45
+                  width: 180
+                  styles: detail_style
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  pad_all: 2
+                  align: CENTER
+                  widgets:
+                    - led:
+                        id: fan_led
+                        align: LEFT_MID
+                        color: 0x00FF00
+                        brightness: 0%
+                    - label:
+                        x: 35
+                        styles: label_style
+                        align: LEFT_MID
+                        text: "Fan"
+              - obj:
+                  height: 45
+                  width: 180
+                  styles: detail_style
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  pad_all: 2
+                  align: CENTER
+                  widgets:
+                    - led:
+                        id: dem_led
+                        align: LEFT_MID
+                        color: 0xFF00AF
+                        brightness: 0%
+                    - label:
+                        x: 35
+                        styles: label_style
+                        align: LEFT_MID
+                        text: "Reversing"
+              - obj:
+                  height: 45
+                  width: 180
+                  styles: detail_style
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  pad_all: 2
+                  align: CENTER
+                  widgets:
+                    - led:
+                        id: heat1_led
+                        align: LEFT_MID
+                        color: 0xFF5C5C
+                        brightness: 0%
+                    - label:
+                        x: 35
+                        styles: label_style
+                        align: LEFT_MID
+                        text: "Heat Low"
+              - obj:
+                  height: 45
+                  width: 180
+                  styles: detail_style
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  pad_all: 2
+                  align: CENTER
+                  widgets:
+                    - led:
+                        id: heat2_led
+                        align: LEFT_MID
+                        color: 0xFF0000
+                        brightness: 0%
+                    - label:
+                        x: 35
+                        styles: label_style
+                        align: LEFT_MID
+                        text: "Heat High"
+              - obj:
+                  height: 45
+                  width: 180
+                  styles: detail_style
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  pad_all: 2
+                  align: CENTER
+                  widgets:
+                    - led:
+                        id: cool1_led
+                        align: LEFT_MID
+                        color: 0x0000FF
+                        brightness: 0%
+                    - label:
+                        x: 35
+                        styles: label_style
+                        align: LEFT_MID
+                        text: "Cool Low"
+              - obj:
+                  height: 45
+                  width: 180
+                  styles: detail_style
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  pad_all: 2
+                  align: CENTER
+                  widgets:
+                    - led:
+                        id: cool2_led
+                        align: LEFT_MID
+                        color: 0x0000FF
+                        brightness: 0%
+                    - label:
+                        x: 35
+                        styles: label_style
+                        align: LEFT_MID
+                        text: "Cool High"
+              - obj:
+                  height: 45
+                  width: 180
+                  styles: detail_style
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  pad_all: 2
+                  align: CENTER
+                  widgets:
+                    - led:
+                        id: outside_temp_led
+                        align: LEFT_MID
+                        color: 0xFFFF00
+                        brightness: 0%
+                    - label:
+                        x: 35
+                        styles: label_style
+                        align: LEFT_MID
+                        text: "Run HP"
+              - obj:
+                  height: 45
+                  width: 180
+                  styles: detail_style
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  pad_all: 2
+                  align: CENTER
+                  widgets:
+                    - led:
+                        id: defrost_led
+                        align: LEFT_MID
+                        color: 0xFF00AF
+                        brightness: 0%
+                    - label:
+                        x: 35
+                        styles: label_style
+                        align: LEFT_MID
+                        text: "Defrost HP"        
+    - id: advanced
+      on_load:
+        - select.set_index: 
+            id: sel_pages
+            index: 1
+      widgets:
+        - obj:
+            layout:
+              type: flex
+              pad_row: 4
+              pad_column: 4px
+              flex_flow: COLUMN_WRAP
+              flex_align_cross: CENTER
+            y: 40
+            x: 0
+            pad_all: 3
+            height: 90%
+            width: 260
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            align: TOP_LEFT
+            widgets:
+              - label:
+                  width: 200
+                  styles: label_style
+                  align: TOP_LEFT
+                  text: "Temp Gap:"
+              - obj:
+                  height: 50
+                  width: 200
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  align: CENTER
+                  pad_all: 2
+                  widgets:
+                    - button:
+                        align: BOTTOM_LEFT
+                        width: 30
+                        height: 40
+                        id: btn_gap_dwn
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "-"
+                        on_click:
+                          then:
+                            - lvgl.widget.focus: gap_temp
+                            - lvgl.spinbox.decrement: gap_temp
+                            - number.set:
+                                id: gap_clicked
+                                value: 1
+                        on_long_press_repeat:
+                          then:
+                            - lvgl.spinbox.decrement: gap_temp
+                        on_release:
+                          then:
+                            - number.set:
+                                id: gap_changed
+                                value: 1
+                    - spinbox:
+                        id: gap_temp
+                        align: CENTER
+                        bg_opa: TRANSP
+                        step: 0.1
+                        digits: 3
+                        styles: detail_style
+                        range_from: 55.0
+                        range_to: 85.0
+                        decimal_places: 1
+                        value: 720.0
+                    - button:
+                        align: BOTTOM_RIGHT
+                        width: 30
+                        height: 40
+                        id: btn_gap_up
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "+"
+                        on_click:
+                          then:
+                            - lvgl.widget.focus: gap_temp
+                            - lvgl.spinbox.increment: gap_temp
+                            - number.set:
+                                id: gap_clicked
+                                value: 1
+                            
+                        on_long_press_repeat:
+                          then:
+                            - lvgl.spinbox.increment: gap_temp
+                        on_release:
+                          then:
+                            - number.set:
+                                id: gap_changed
+                                value: 1
+    - id: weather_forecast
+      on_load:
+        - select.set_index: 
+            id: sel_pages
+            index: 2
+      widgets:
+        - obj:
+            align: CENTER
+            width: 300
+            height: 300
+            pad_all: 10
+            pad_bottom: 0
+            bg_color: 0
+          #  pad_column: 0
+            layout:
+              type: GRID
+              grid_rows: [FR(48), FR(13), FR(13), FR(13), FR(13)]
+              grid_columns: [FR(10), FR(40), FR(40), FR(10)]
+            widgets:
+              - label:
+                  text: "\U000F14E4"
+                  id: lbl_weather_forecast_condition_icon
+                  styles: weather_icon
+                  grid_cell_row_pos: 0
+                  grid_cell_column_pos: 0
+                  grid_cell_column_span: 2
+                  grid_cell_x_align: CENTER
+                  grid_cell_y_align: START
+
+              - label:
+                  text: "Unknown"
+                  id: lbl_weather_forecast_condition_name
+                  styles: label_style
+                  text_align: CENTER
+                  grid_cell_row_pos: 0
+                  grid_cell_column_pos: 2
+                  grid_cell_column_span: 2
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+
+              - label:
+                  text: "Feels like:"
+                  styles: label_style
+                  grid_cell_row_pos: 1
+                  grid_cell_column_pos: 1
+
+              - label:
+                  text: "--.- °F"
+                  id: lbl_weather_forecast_tempap
+                  styles: label_style
+                  text_align: RIGHT
+                  grid_cell_row_pos: 1
+                  grid_cell_column_pos: 2
+                  grid_cell_x_align: STRETCH
+
+              - label:
+                  text: "Maximum:"
+                  styles: label_style
+                  grid_cell_row_pos: 2
+                  grid_cell_column_pos: 1
+
+              - label:
+                  text: "--.- °F"
+                  id: lbl_weather_forecast_temphi
+                  styles: label_style
+                  text_align: RIGHT
+                  grid_cell_row_pos: 2
+                  grid_cell_column_pos: 2
+                  grid_cell_x_align: STRETCH
+
+              - label:
+                  text: "Minimum:"
+                  styles: label_style
+                  grid_cell_row_pos: 3
+                  grid_cell_column_pos: 1
+
+              - label:
+                  text: "--.- °F"
+                  styles: label_style
+                  id: lbl_weather_forecast_templo
+                  text_align: RIGHT
+                  grid_cell_row_pos: 3
+                  grid_cell_column_pos: 2
+                  grid_cell_x_align: STRETCH
+
+              - label:
+                  text: "Now:"
+                  styles: label_style
+                  grid_cell_row_pos: 4
+                  grid_cell_column_pos: 1
+
+              - label:
+                  text: "--.- °F"
+                  styles: label_style
+                  id: lbl_weather_outdnoor_now
+                  text_align: RIGHT
+                  grid_cell_row_pos: 4
+                  grid_cell_column_pos: 2
+                  grid_cell_x_align: STRETCH
+              
+        
+  
+
+
+    

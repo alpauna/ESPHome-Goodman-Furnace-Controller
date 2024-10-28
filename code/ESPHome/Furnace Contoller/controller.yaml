@@ -1,0 +1,580 @@
+esphome:
+  name: therm-master
+  friendly_name: Therm Master
+  on_boot:
+    then:
+      # read the RTC time once when the system boots
+      pcf8563.read_time: pcf8563_time
+
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+  
+# Enable logging
+logger:
+  level: INFO
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret therm_master_api_key
+
+ota:
+  - platform: esphome
+    password: !secret therm_master_ota_pass
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Therm-Master Fallback Hotspot"
+    password: !secret therm_master_ap_pass
+
+captive_portal:
+i2c:
+  sda: GPIO08
+  scl: GPIO09
+  scan: true
+  id: bus_a
+  frequency: 100kHz
+
+web_server:
+  port: 80
+  auth:
+    username: !secret web_server_username
+    password: !secret web_server_password
+
+time:
+  - platform: pcf8563
+    id: pcf8563_time
+    timezone: "America/Chicago"
+    address: 0x51
+    update_interval: never
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: '*'
+        then:
+          - lambda: |-
+                    ESP_LOGI("lambda", "Time now: %s", id(pcf8563_time).now().strftime("%A %d %B %Y at %I:%M:%S %p").c_str());
+
+  - platform: homeassistant
+    id: ha_time
+    timezone: "America/Chicago"
+    on_time_sync:
+      then:
+        # ... and update the RTC when the synchronization was successful
+        - pcf8563.write_time: pcf8563_time
+    on_time:
+      - seconds: 0
+        minutes: '*'
+        then:
+          - if:
+              condition: # added this one to allow kind of async check if something changes on climate thus helping to prevent many call to script.
+                - lambda: return int(id(check_state_after_min).state) > 0; 
+              then:
+                - logger.log:
+                    level: INFO
+                    format: "Check state after a min called so running idle script check." 
+                - number.to_min: check_state_after_min
+                - lambda: |-
+                    id(check_fan_idle_script).execute();
+               
+                    
+                    
+
+
+switch:
+  - platform: gpio
+    pin: GPIO05
+    name: "Reversing Valve"
+    id: rev
+    inverted: False
+
+  - platform: gpio
+    pin: GPIO06
+    id: comp1
+    name: "Call Compressor"
+    inverted: False
+  
+  - platform: gpio
+    pin: GPIO07
+    id: comp2
+    name: "Call Compressor 2"
+    inverted: False
+    
+  - platform: gpio
+    pin: GPIO04
+    id: fan1
+    name: "Fan"
+    inverted: False
+    on_turn_off:
+      then:
+        - number.increment: 
+            id: check_state_after_min
+            cycle: False
+
+  - platform: gpio
+    pin: GPIO16
+    id: w2
+    name: "Full Heat"
+    inverted: False
+
+  - platform: gpio
+    pin: GPIO15
+    id: w1
+    name: "Heat Low"
+
+  - platform: template
+    id: run_fan_on_idle
+    name: "Run Fan On Idle"
+    optimistic: True
+    on_turn_on: 
+      then:
+        - script.execute:
+            id: check_fan_idle_script
+    on_turn_off:
+      then:
+        - script.execute:
+            id: check_fan_idle_script
+              
+    
+number:
+  - platform: template
+    id: high_low_gap
+    name: "High Low Temp Gap"
+    min_value: 0.2
+    max_value: 8.0
+    set_action: 
+      then:
+        - lambda: 
+            id(high_low_gap).publish_state(x);
+    step: 0.1
+    on_value: 
+      then:
+        - lambda: !lambda |-
+            id(therm_control1).set_set_point_minimum_differential(float((x-32.0)/1.8));
+  - platform: template
+    id: fan_run_min_idle
+    name: "Fan run on idle"
+    initial_value: 10
+    min_value: 1
+    max_value: 20
+    step: 1
+    set_action: 
+      then:
+        - lambda: 
+            id(fan_run_min_idle).publish_state(x);
+  - platform: template
+    id: fan_wait_min_idle
+    name: "Fan Idle Minutes Until Run"
+    initial_value: 60
+    min_value: 20
+    max_value: 120
+    step: 1
+    set_action: 
+      then:
+        - lambda: 
+            id(fan_wait_min_idle).publish_state(x);
+  - platform: template
+    id: fan_idle_running
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    set_action: 
+      then:
+        - lambda: 
+            id(fan_idle_running).publish_state(x);
+  - platform: template
+    id: check_state_after_min
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    set_action: 
+      then:
+        - lambda: 
+            id(check_state_after_min).publish_state(x);
+  - platform: template
+    id: in_defrost_mode
+    initial_value: 0
+    min_value: 0
+    max_value: 1
+    step: 1
+    set_action: 
+      then:
+        - lambda: 
+            id(in_defrost_mode).publish_state(x);
+   
+            
+
+binary_sensor:
+  - platform: gpio
+    pin: GPIO45
+    id: out_temp_ok_in
+    name: "Outside Temp Status"
+    filters:
+      - delayed_on_off: 4s
+    on_press: 
+      then:
+        - if:
+            condition: # If heating and this turns on then switch over to comp1 since it is warm enough and it is not already running w2 heat state
+              - lambda: return id(therm_control1).action == CLIMATE_ACTION_HEATING && !id(comp1).state && id(w2).state && !id(defrost_mode_in).state;
+            then:
+              - switch.turn_off: w1
+              - switch.turn_off: w2
+              - switch.turn_on: comp1
+    on_release:
+      then:
+        - if:
+            condition: # In heating mode and external temp dropped too low so now turn off compressor and go with furnace only.
+              - lambda: return id(therm_control1).action == CLIMATE_ACTION_HEATING && !id(w1).state && !id(w2).state && (id(comp1).state || id(comp2).state);
+            then:
+              - switch.turn_off: comp1
+              - switch.turn_off: comp2
+              - switch.turn_on: w1
+
+
+
+      
+  - platform: gpio
+    pin: GPIO47
+    id: defrost_mode_in
+    name: "Defrost Mode"
+    filters:
+      - delayed_on_off: 2s
+    on_press:
+      then:
+        - if:
+            condition:
+              - lambda: return id(therm_control1).action == CLIMATE_ACTION_HEATING && id(out_temp_ok_in).state;
+            then:
+              - switch.turn_on: w1
+              - number.increment: 
+                  id: in_defrost_mode
+                  cycle: False
+              - logger.log:
+                  level: INFO
+                  format: "HP Called for Defrost." 
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "HP Defrost start ignored. Monitored states heat action: %d, w1 state %d, out_time_ok_in %d, heating mode: %d"
+                  args: ["id(therm_control1).action" , "id(w1).state", "id(out_temp_ok_in).state", "id(therm_control1).mode"]
+    on_release: 
+      then:
+        - if:
+            condition: # In heating and warm enough to run HP so turn off w1 if it is on or for some reason defost is shutdown and not in heating mode make sure to kill w1.
+              - lambda: return (id(therm_control1).action == CLIMATE_ACTION_HEATING && id(out_temp_ok_in).state && id(w1).state) || (!id(therm_control1) == CLIMATE_ACTION_HEATING && id(w1).state);
+            then:
+              - switch.turn_off: w1
+              - number.decrement: 
+                  id: in_defrost_mode
+                  cycle: False
+              - logger.log:
+                  level: INFO
+                  format: "HP ended Defrost."
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "HP Defrost end ignored. Monitored states heat action: %d, w1 state %d, out_time_ok_in %d, heating mode: %d"
+                  args: ["id(therm_control1).action" , "id(w1).state", "id(out_temp_ok_in).state", "id(therm_control1).mode"]
+
+  
+sensor:
+  - platform: homeassistant
+    id: current_temperature
+    entity_id: sensor.average_home_temperature
+    filters:
+      - lambda: return (x - 32.0) / 1.8;
+  
+script:
+  - id: fan_duty_script
+    mode: queued # want it to complete the current script but queue up a new one if script reran at right point. 
+    # That is why queued istead of restart.
+    then:
+      - if:
+          condition:
+            and:
+              - switch.is_on: run_fan_on_idle
+              - lambda: return id(therm_control1).action == CLIMATE_ACTION_IDLE && id(therm_control1).mode != CLIMATE_MODE_OFF;
+          then: 
+            - logger.log:
+                level: INFO
+                format: "Before run delay: %d min after run delay %d min." 
+                args: ["int(id(fan_wait_min_idle).state)", "int(id(fan_run_min_idle).state)" ]  
+            - number.increment: 
+                id: fan_idle_running
+                cycle: False
+            - delay: !lambda return (int(id(fan_wait_min_idle).state) * 60000);
+            - if:
+                condition:
+                  - lambda: return id(therm_control1).action == CLIMATE_ACTION_IDLE;
+                then:
+                  - switch.turn_on: fan1
+                  - logger.log:
+                      level: INFO
+                      format: "At run delay: %d min after run delay %d min." 
+                      args: ["int(id(fan_wait_min_idle).state)", "int(id(fan_run_min_idle).state)"]    
+                  - delay: !lambda return (int(id(fan_run_min_idle).state) * 60000);
+                  - if:
+                      condition:
+                        - lambda: return id(therm_control1).action == CLIMATE_ACTION_IDLE;
+                      then:
+                        - number.decrement: 
+                            id: fan_idle_running # key to get events to queue up new script at right time.
+                            cycle: False
+                        - switch.turn_off: fan1
+                      else:
+                        - number.decrement: 
+                            id: fan_idle_running
+                            cycle: False
+                        - logger.log:
+                            level: WARN
+                            format: "On Fan Idle attempted to stop fan while non-idle climate state: %d"
+                            args: ["id(therm_control1).action"] 
+                else:
+                  - number.decrement: 
+                      id: fan_idle_running
+                      cycle: False
+                  - logger.log:
+                      level: WARN
+                      format: "On Fan Idle attempted to start fan while non-idle climate state: %d"
+                      args: ["id(therm_control1).action"]
+            - number.decrement: 
+                id: fan_idle_running
+                cycle: False
+            - logger.log:
+                format: "Completed: Run Before run delay: %d min after run delay %d min." 
+                args: ["int(id(fan_wait_min_idle).state)", "int(id(fan_run_min_idle).state)"]
+                level: INFO 
+          else:
+            - logger.log: 
+                format: "Fan On Idle is not supposed to run. Climate state: %d and mode: %d"
+                level: WARN
+                args: ["id(therm_control1).action", "id(therm_control1).mode"]
+            - script.stop: fan_duty_script
+      - number.decrement: 
+          id: fan_idle_running
+          cycle: False
+
+  - id: check_fan_idle_script
+    then:
+      - if: #Check current state of climate action. If not idle then make sure script is not running.
+          condition:
+            - lambda: return (id(therm_control1).action != CLIMATE_ACTION_IDLE && int(id(fan_idle_running).state) > 0) || id(therm_control1).mode == CLIMATE_MODE_OFF;
+          then: # should not run script here so stop it.
+            - logger.log: 
+                level: INFO 
+                format: "Not in idle so stoping script. Current climate state: %d, mode: %d"
+                args: ["id(therm_control1).action", "id(therm_control1).mode"]
+            - script.stop: fan_duty_script
+            - number.to_min: fan_idle_running
+        
+      - if:
+          condition:
+              and:
+                - switch.is_on: run_fan_on_idle
+                - lambda: return id(therm_control1).action == CLIMATE_ACTION_IDLE && id(therm_control1).mode != CLIMATE_MODE_OFF;
+          then:
+            - if:
+                condition:
+                  or:
+                    - lambda: return int(id(fan_idle_running).state) == 0;
+                    - not:
+                      - script.is_running: fan_duty_script
+                then:
+                  - logger.log: 
+                      level: INFO 
+                      format: "Fan Script is not running turning on script."
+                  - number.to_min: fan_idle_running
+                  - script.execute:
+                      id: fan_duty_script
+                else:
+                  - logger.log: 
+                      level: INFO 
+                      format: "Skipping fan script is already running and enabled. Current climate state: %d, mode: %d"
+                      args: ["id(therm_control1).action", "id(therm_control1).mode"]
+          else:
+            - if:
+                condition: 
+                  - script.is_running: fan_duty_script
+                then:
+                  - logger.log: 
+                      level: INFO 
+                      format: "Fan idle is disabled or climate not idle state so turning off fan idle script. Current climate state: %d, mode: %d"
+                      args: ["id(therm_control1).action", "id(therm_control1).mode"]
+                  - script.stop: fan_duty_script
+                  - number.to_min: fan_idle_running # need to reset this in this case so it can be script restarted if something changes with climate.
+                  - if: # also turn fan off if it is running here...
+                      condition: 
+                        and:
+                          - switch.is_on: fan1
+                          - lambda: return id(therm_control1).action == CLIMATE_ACTION_IDLE || id(therm_control1).mode == CLIMATE_MODE_OFF;    
+                      then: 
+                        - logger.log: 
+                            level: INFO 
+                            format: "Turning off Fan since climate idle or off. Current climate state: %d, mode: %d"
+                            args: ["id(therm_control1).action", "id(therm_control1).mode"]
+                        - switch.turn_off: fan1
+                else:
+                  - logger.log: 
+                      level: DEBUG 
+                      format: "Fan idle is disable or climate not idle and fan idle script is stopped."
+                        
+  
+
+
+climate:
+  - platform: thermostat
+    name: "Thermostat Climate Controller"
+    id: therm_control1
+    sensor: current_temperature
+    set_point_minimum_differential: .5 °F
+    min_cooling_off_time: 3min
+    min_cooling_run_time: 5min
+    min_heating_off_time: 3min
+    min_heating_run_time: 3min
+    min_fanning_run_time: 3min
+    min_fanning_off_time: 3min
+    max_heating_run_time: 30min
+    max_cooling_run_time: 30min
+    startup_delay: True
+    heat_deadband: .2 °F
+    heat_overrun: 0.0 °F
+    cool_overrun: .1 °F
+    cool_deadband: .3 °F
+    supplemental_cooling_delta: .6 °F
+    supplemental_heating_delta: .5 °F
+    min_idle_time: 30s
+    fan_with_cooling: True
+    fan_with_heating: True
+    off_mode:
+      - switch.turn_off: rev
+      - switch.turn_off: comp1
+      - switch.turn_off: comp2
+      - switch.turn_off: w2
+      - switch.turn_off: w1
+      - switch.turn_off: fan1
+  
+    fan_only_mode:
+      then:
+        - switch.turn_off: rev
+        - switch.turn_off: comp1
+        - switch.turn_off: comp2
+        - switch.turn_off: w2
+        - switch.turn_off: w1
+        - switch.turn_off: fan1
+        - delay: 1s  
+        - switch.turn_on: fan1
+    cool_action:
+      then:
+        - switch.turn_off: w2
+        - switch.turn_off: w1
+        - switch.turn_off: comp2
+        - switch.turn_on: rev
+        - switch.turn_on: comp1
+        - logger.log:
+            level: INFO
+            format: "Called for cooling." 
+           
+    heat_action:
+      then:
+        - switch.turn_off: rev
+        - switch.turn_off: w2
+        - switch.turn_off: comp2
+        - if:
+            condition:
+              - binary_sensor.is_on: out_temp_ok_in
+            then: # warm enough to run HP
+              - logger.log:
+                  level: INFO
+                  format: "Heatpump can run so doing that" 
+              - switch.turn_on: comp1
+            else:
+              - logger.log:
+                  level: INFO
+                  format: "Too cold outside so call furnace instead." 
+              - switch.turn_on: w1
+        - logger.log:
+            level: INFO
+            format: "Called for heating." 
+    supplemental_heating_action:
+      then:
+        - switch.turn_off: rev
+        - if:
+            condition:
+              - switch.is_on: comp1
+            then:
+              - switch.turn_off: comp1
+        - switch.turn_on: w1
+        - switch.turn_on: w2
+
+    supplemental_cooling_action:
+      then:
+        - switch.turn_off: w2
+        - switch.turn_off: w1
+        - switch.turn_on: rev
+        - switch.turn_on: comp1
+        - switch.turn_on: comp2
+        - logger.log:
+            level: INFO
+            format: "Called for extra cooling." 
+              
+    fan_only_action:
+      then:
+        - switch.turn_on: fan1
+        - if:
+            condition:
+              - script.is_running: fan_duty_script
+            then:
+              - logger.log: 
+                  format: Stopping Fan Script.
+                  level: INFO
+              - script.stop: fan_duty_script
+        - logger.log:
+            level: INFO
+            format: "Fan only action called." 
+    idle_action:
+      - switch.turn_off: rev
+      - switch.turn_off: comp1
+      - switch.turn_off: comp2
+      - switch.turn_off: w2
+      - switch.turn_off: w1
+      - switch.turn_off: fan1
+      - if:
+          condition:
+            not:
+              - script.is_running: fan_duty_script
+          then:
+            - logger.log: 
+                format: Fan Script is not running!
+                level: INFO
+            - script.execute:
+                id: check_fan_idle_script
+          else:
+              - logger.log: 
+                  format: Skipping fan script is already running!
+                  level: INFO
+      - logger.log:
+            level: INFO
+            format: "Idle action ran." 
+
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 73 °F
+        default_target_temperature_high: 75.0 °F
+    on_control: 
+      then:
+        - number.increment: 
+            id: check_state_after_min
+            cycle: False
+          
+        
+    
