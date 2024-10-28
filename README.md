@@ -1,6 +1,6 @@
 # ESPHome Goodman Funace Controller
-## well thats funny
-Um.. should be called furnace not funace but you get the idea... Maybe I will fix it at sometime but this seems difficult to fix at this point. Anyway this was FUN to build so the name fits! Actually, it was way crazy but working from home I am sick of hearing the old controller relays. This board uses triacs to accomplish what the old relays did. 
+## Why?
+Actually, it was way crazy but working from home I am sick of hearing the old controller relays. This board uses triacs to accomplish what the old relays did. ODC much anyway I learned so much with this board so I also wanted to share and keep for prosperity. Also, maybe someone will find this interesting or useful in other endeavors related to climate controls.  
 ## Info
  This is the current ESPHome code and support for my Goodman Furnace Controller. 
  I have a blog on this [here](https://alshowto.com/esp32-s3-climatefurnace-controller/)
