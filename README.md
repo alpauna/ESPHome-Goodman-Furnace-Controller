@@ -1,6 +1,6 @@
 # ESPHome Goodman Funace Controller
 ## well thats funny
-Um.. should be called furnance not funace but you get the idea... Maybe I will fix it at sometime but this seems difficult to fix at this point. Anyway this was FUN to build so the name fits! Actually, it was way crazy but working from home I am sick of hearing the old controller relays. This board uses triacs to accomplish what the old relays did. 
+Um.. should be called furnace not funace but you get the idea... Maybe I will fix it at sometime but this seems difficult to fix at this point. Anyway this was FUN to build so the name fits! Actually, it was way crazy but working from home I am sick of hearing the old controller relays. This board uses triacs to accomplish what the old relays did. 
 ## Info
  This is the current ESPHome code and support for my Goodman Furnace Controller. 
  I have a blog on this [here](https://alshowto.com/esp32-s3-climatefurnace-controller/)
@@ -20,16 +20,16 @@ Um.. should be called furnance not funace but you get the idea... Maybe I will f
 |------|---------|--------
 |Furnance| Furnace outputs and inputs| smaller of the two connectors
 |R|24vac output from furnace| Typically also R inside furnace
-|COM|Common neutral wire| ** Note: this may be bonded to furnace metal!** do not let controller board come in contact with any metal on the furnace or it will blow the fuses and who knows what else! ** You have been warned!!! **
+|COM|Common neutral wire| **Note: this may be bonded to furnace metal!  DO NOT!!! let controller board come in contact with any metal on the furnace or it will blow the fuses and who knows what else!** You have been warned!!!
 |G| Fan Control| 24vac turns on the fan.
-|Y1| Low Cool Control| 24vac turns on low cool mode. ** Y1 in version 1 controls both Heatpump and Furnace Y1 ** with my configuration it was not needed to worry about control of HP Y1 or compressor vs furnace Y1 in later versions I separated Y1 just like I did for Y2 so that will be a firmware update once I get the newer contoller boards from JLPCB.
+|Y1| Low Cool Control| 24vac turns on low cool mode. **Y1 in version 1 controls both Heatpump and Furnace Y1** with my configuration it was not needed to worry about control of HP Y1 or compressor vs furnace Y1 in later versions I separated Y1 just like I did for Y2 so that will be a firmware update once I get the newer contoller boards from JLPCB.
 |Y2| High Cool Control| 24vac turns on high cool mode.
 |W1| Low Heat Control| Turns on low gas valve and low heat fan speed.
 |W2| High Heat Control| Turns on high gas valve and high heat fan speed.
 |Heatpump|Larger of the spring terminals marked with heatpump
 |COM|Same as furnace COM|Neutral to heatpump
 |R|24vac always supplied to heatpump|This goes through the 3 amp F2 fuse on controller.
-|Y1|Compressor Low Control| 24vac when low cool or low heat is called for by controller. My heatpump only has single speed compressor so this is what I use. ** Shared with Y1 to furnace in V 1** see note in furnace section above.
+|Y1|Compressor Low Control| 24vac when low cool or low heat is called for by controller. My heatpump only has single speed compressor so this is what I use. **Shared with Y1 to furnace in V1** see note in furnace section above.
 |Y2|Compressor High Control| 24vac when high cool or high heat is called for by controller.| Never really tested this as my heatpump only is single stage.
 |OT-C|24vac all of the time| This is all supplied by furnace.
 |OT-NC|24vac is here when temp is > 32 °F|Note 32 ° is just an estimate of what to use your temp may be different. That is the purpose of the external temp sensor on the HP based on thermal efficiency. If no external device than some other means could be applied to generate the voltage here even dc should work if you know what you are doing. In my case, I have a sensor for this from [here](https://iwae.com/media/manuals/goodman/ot18-60a-installation.pdf).  
