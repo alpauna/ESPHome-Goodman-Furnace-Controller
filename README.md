@@ -1,4 +1,4 @@
-# ESPHome Goodman Funace Controller
+# ESPHome Goodman Furnace Controller
 ## Why?
 Actually, it was way crazy but working from home I am sick of hearing the old controller relays. This board uses triacs to accomplish what the old relays did. ODC much anyway I learned so much with this board so I also wanted to share and keep for prosperity. Also, maybe someone will find this interesting or useful in other endeavors related to climate controls.  
 ## Info
