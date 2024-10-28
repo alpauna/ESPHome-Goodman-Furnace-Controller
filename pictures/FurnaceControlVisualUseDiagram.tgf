@@ -1,0 +1,23 @@
+1 Heatpump
+2 Furnace
+3 Goodman Furnace Controller
+4 Home Assistant
+5 ESPHome
+6 Heat
+7 Cool
+8 Fan
+9 Reversing Valve
+10 Compressor
+11 Defrost Controller
+12 Outside Temp Sensor
+#
+12 3 OT-NC 24vac when > 32 °F
+12 3 OT-NO 24vac when < 32 °F
+3 12 OT-C 24vac All of the time
+11 3 W 24vac when Defrost is called for by HP
+3 10 Y1c Low Compressor Y2c High Compressor
+10 10
+3 9 O  24vac for cool mode
+3 8 G 2vac for Fan
+3 7 Y1 -> Low Speed Cool Y2 -> High Speed Cool 2vac to control
+3 6 W1 -> Low Heat W2 -> High Heat 24vac to control
