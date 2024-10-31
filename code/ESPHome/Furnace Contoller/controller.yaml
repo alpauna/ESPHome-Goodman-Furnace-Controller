@@ -60,7 +60,7 @@ time:
         hours: '*'
         then:
           - lambda: |-
-                    ESP_LOGI("lambda", "Time now: %s", id(pcf8563_time).now().strftime("%A %d %B %Y at %I:%M:%S %p").c_str());
+                    ESP_LOGD("lambda", "Time now: %s", id(pcf8563_time).now().strftime("%A %d %B %Y at %I:%M:%S %p").c_str());
 
   - platform: homeassistant
     id: ha_time
@@ -78,7 +78,7 @@ time:
                 - lambda: return int(id(check_state_after_min).state) > 0; 
               then:
                 - logger.log:
-                    level: INFO
+                    level: DEBUG
                     format: "Check state after a min called so running idle script check." 
                 - number.to_min: check_state_after_min
                 - lambda: |-
@@ -398,7 +398,7 @@ script:
             - logger.log:
                 format: "Completed: Run Before run delay: %d min after run delay %d min." 
                 args: ["int(id(fan_wait_min_idle).state)", "int(id(fan_run_min_idle).state)"]
-                level: INFO 
+                level: DEBUG
           else:
             - logger.log: 
                 format: "Fan On Idle is not supposed to run. Climate state: %d and mode: %d"
@@ -476,6 +476,11 @@ script:
     mode: restart
     then:
       - lambda: |-
+          if(id(therm_control1).action != CLIMATE_ACTION_HEATING)
+          {
+            ESP_LOGD("heat_action_script", "Script called when not heating so getting out! Action = %d Mode = %d",  id(therm_control1).action, id(therm_control1).mode);
+            return;
+          }
           if(id(user_forced_no_hp).state) // user forced no hp so just ignore HP heating by forcing furnace only mode.
           {
             ESP_LOGI("heat_action_script", "Setting force mode based on user force no HP. State of heating level: %d or %s force furnace mode %s", id(heating_level).active_index().value(), id(heating_level).state.c_str(), id(force_furnace_mode).state ? "True" : "False");
@@ -687,7 +692,7 @@ climate:
           then:
             - logger.log: 
                 format: Fan Script is not running!
-                level: INFO
+                level: DEBUG
             - script.execute:
                 id: check_fan_idle_script
           else:
