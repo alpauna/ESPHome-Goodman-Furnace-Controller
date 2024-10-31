@@ -141,6 +141,29 @@ switch:
       then:
         - script.execute:
             id: check_fan_idle_script
+  - platform: template
+    id: user_forced_no_hp
+    name: "No Heatpump Heating"
+    optimistic: True
+    on_turn_on: 
+      then:
+        - select.set_index:
+            id: heating_level
+            index: 0
+        - script.execute:
+            id: call_heat_action
+    on_turn_off:
+      then:
+        - select.set_index:
+            id: heating_level
+            index: 0
+        - switch.turn_off: force_furnace_mode # have to call this before the script below so it is in the proper state ahead of the script. This is because this has to real states one set by user and one set by script so it has to be reset manually here.
+        - script.execute:
+            id: call_heat_action
+
+  - platform: template
+    id: force_furnace_mode
+    optimistic: True
               
     
 number:
@@ -210,6 +233,29 @@ number:
       then:
         - lambda: 
             id(in_defrost_mode).publish_state(x);
+  
+  
+select:
+  - platform: template
+    id: heating_level #added this to keep track of level of supplement heat applied at this time. Reset by idle action. Incremented in supplimental heating action.
+    name: "Current Heating Mode"
+    options:
+     - "Idle"
+     - "HP Heat Low"
+     - "HP Heat High"
+     - "Furnace Heat Low"
+     - "Furnace Heat High"
+    initial_option: "Idle"
+    set_action: 
+      then:
+        - lambda: 
+            id(heating_level).publish_state(x);
+        - logger.log:
+            level: INFO
+            format: "Heat level changed to: %s"
+            args: ["x.c_str()"]
+        
+          
    
             
 
@@ -305,7 +351,7 @@ script:
               - lambda: return id(therm_control1).action == CLIMATE_ACTION_IDLE && id(therm_control1).mode != CLIMATE_MODE_OFF;
           then: 
             - logger.log:
-                level: INFO
+                level: DEBUG
                 format: "Before run delay: %d min after run delay %d min." 
                 args: ["int(id(fan_wait_min_idle).state)", "int(id(fan_run_min_idle).state)" ]  
             - number.increment: 
@@ -318,7 +364,7 @@ script:
                 then:
                   - switch.turn_on: fan1
                   - logger.log:
-                      level: INFO
+                      level: DEBUG
                       format: "At run delay: %d min after run delay %d min." 
                       args: ["int(id(fan_wait_min_idle).state)", "int(id(fan_run_min_idle).state)"]    
                   - delay: !lambda return (int(id(fan_run_min_idle).state) * 60000);
@@ -370,7 +416,7 @@ script:
             - lambda: return (id(therm_control1).action != CLIMATE_ACTION_IDLE && int(id(fan_idle_running).state) > 0) || id(therm_control1).mode == CLIMATE_MODE_OFF;
           then: # should not run script here so stop it.
             - logger.log: 
-                level: INFO 
+                level: DEBUG
                 format: "Not in idle so stoping script. Current climate state: %d, mode: %d"
                 args: ["id(therm_control1).action", "id(therm_control1).mode"]
             - script.stop: fan_duty_script
@@ -390,14 +436,14 @@ script:
                       - script.is_running: fan_duty_script
                 then:
                   - logger.log: 
-                      level: INFO 
+                      level: DEBUG
                       format: "Fan Script is not running turning on script."
                   - number.to_min: fan_idle_running
                   - script.execute:
                       id: fan_duty_script
                 else:
                   - logger.log: 
-                      level: INFO 
+                      level: DEBUG 
                       format: "Skipping fan script is already running and enabled. Current climate state: %d, mode: %d"
                       args: ["id(therm_control1).action", "id(therm_control1).mode"]
           else:
@@ -406,7 +452,7 @@ script:
                   - script.is_running: fan_duty_script
                 then:
                   - logger.log: 
-                      level: INFO 
+                      level: DEBUG
                       format: "Fan idle is disabled or climate not idle state so turning off fan idle script. Current climate state: %d, mode: %d"
                       args: ["id(therm_control1).action", "id(therm_control1).mode"]
                   - script.stop: fan_duty_script
@@ -418,7 +464,7 @@ script:
                           - lambda: return id(therm_control1).action == CLIMATE_ACTION_IDLE || id(therm_control1).mode == CLIMATE_MODE_OFF;    
                       then: 
                         - logger.log: 
-                            level: INFO 
+                            level: DEBUG
                             format: "Turning off Fan since climate idle or off. Current climate state: %d, mode: %d"
                             args: ["id(therm_control1).action", "id(therm_control1).mode"]
                         - switch.turn_off: fan1
@@ -426,9 +472,103 @@ script:
                   - logger.log: 
                       level: DEBUG 
                       format: "Fan idle is disable or climate not idle and fan idle script is stopped."
-                        
-  
+  - id: call_heat_action # made this all C because it is that complex.
+    mode: restart
+    then:
+      - lambda: |-
+          if(id(user_forced_no_hp).state) // user forced no hp so just ignore HP heating by forcing furnace only mode.
+          {
+            ESP_LOGI("heat_action_script", "Setting force mode based on user force no HP. State of heating level: %d or %s force furnace mode %s", id(heating_level).active_index().value(), id(heating_level).state.c_str(), id(force_furnace_mode).state ? "True" : "False");
+            id(force_furnace_mode).turn_on();
+          }
+          // in heat call always turn off rev valve if on.
+          if(id(rev).state){ id(rev).turn_off();}
+          auto cur_index = id(heating_level).active_index();
+          int index = -1;
+          if (!cur_index.has_value()) { 
+            // should not get here but anyway if I do set it to idle state.
+            index = 0;
+            auto call = id(heating_level).make_call();
+            call.set_index(index);
+            call.perform();
+            ESP_LOGD("heat_action_script", "Setting heating_level to index 0");
+          }else{
+            index = cur_index.value();
+          }
+          if(id(out_temp_ok_in).state && !id(force_furnace_mode).state) // Not too cold for HP so all conditions for possible HP in this if. Or HP just taking to long and it is forced over to Furnace only mode
+          {
+            // Clear up and Furnace heat states.
+            if(index > 2)
+            { // just switch it over to HP levels. For now can just subtract 2
+              index -= 2;
+            }
+            if(id(w2).state){ id(w2).turn_off();}
+            if(!id(in_defrost_mode).state) // if not running defrost turn off furnace heat low.
+            { 
+              if(id(w1).state){ id(w1).turn_off();}   
+            } 
+            if( index == 0) // Currently idle and not too cold for HP so turn on Heatpump Heat Low
+            {
+              index = 1;
+              if(id(w2).state){ id(w2).turn_off();}
+              if(id(w1).state){ id(w1).turn_off();}
+              if(id(comp2).state){ id(comp2).turn_off();}
+              id(comp1).turn_on();
+              auto call = id(heating_level).make_call();
+              call.set_index(index);
+              call.perform();
+            } else if (index == 1) // HP On low and warm enough for HP High so do that.
+            {
+              index = 2;
+              auto call = id(heating_level).make_call();
+              id(comp1).turn_on();
+              id(comp2).turn_on();
+              // set to HP High Heat 
+              call.set_index(index);
+              call.perform();
+            } else {
+              ESP_LOGI("heat_action_script", "HP is giving it all the BTU's she's got captin! Forced to switch to furnace only mode!", index, id(heating_level).state.c_str()); 
+              id(force_furnace_mode).turn_on();
+            }
+          }
+          // Resetting index here just in case I missed it in above scripts.
+          cur_index = id(heating_level).active_index();
+          index = cur_index.value();
+          if(!id(out_temp_ok_in).state || id(force_furnace_mode).state) 
+          { // in Furnace temp level right now so turn off all hp if running.
+              if(id(comp1).state){ id(comp1).turn_off();}
+              if(id(comp2).state){ id(comp2).turn_off();}
 
+              if(index < 3)
+              { // Just handle HP modes as if idle
+                index=0;
+              } 
+              if (index == 0) // Currently idle and too cold for HP so turn on Furnace Heat Low 
+              {
+                index = 3;
+                if(id(w2).state){ id(w2).turn_off();}      
+                id(w1).turn_on();
+                auto call = id(heating_level).make_call();
+                // set to Furnace 
+                call.set_index(index);
+                call.perform();
+              } else if(index == 3)
+              {
+                index = 4;
+                if(!id(w1).state){ id(w1).turn_on();}  
+                id(w2).turn_on();   
+                auto call = id(heating_level).make_call();
+                // set to Furnace 
+                call.set_index(index);
+                call.perform();
+              } else if(index == 4) 
+              {
+                ESP_LOGI("heat_action_script", "She is giving it all the BTU's she's got captin! at state index: %d or %s", index, id(heating_level).state.c_str());
+              }
+          }
+          cur_index = id(heating_level).active_index();
+          // Info log the current state of heat.
+          ESP_LOGI("heat_action_script", "Setting heating_level to index %d or %s", cur_index.value(), id(heating_level).state.c_str());
 
 climate:
   - platform: thermostat
@@ -461,6 +601,7 @@ climate:
       - switch.turn_off: w2
       - switch.turn_off: w1
       - switch.turn_off: fan1
+      - switch.turn_off: force_furnace_mode
   
     fan_only_mode:
       then:
@@ -472,6 +613,10 @@ climate:
         - switch.turn_off: fan1
         - delay: 1s  
         - switch.turn_on: fan1
+        - switch.turn_off: force_furnace_mode
+        - select.set_index:
+            id: heating_level
+            index: 0
     cool_action:
       then:
         - switch.turn_off: w2
@@ -479,51 +624,35 @@ climate:
         - switch.turn_off: comp2
         - switch.turn_on: rev
         - switch.turn_on: comp1
+        - switch.turn_off: force_furnace_mode
+        - select.set_index:
+            id: heating_level
+            index: 0
         - logger.log:
-            level: INFO
+            level: DEBUG
             format: "Called for cooling." 
            
     heat_action:
       then:
-        - switch.turn_off: rev
-        - switch.turn_off: w2
-        - switch.turn_off: comp2
-        - if:
-            condition:
-              - binary_sensor.is_on: out_temp_ok_in
-            then: # warm enough to run HP
-              - logger.log:
-                  level: INFO
-                  format: "Heatpump can run so doing that" 
-              - switch.turn_on: comp1
-            else:
-              - logger.log:
-                  level: INFO
-                  format: "Too cold outside so call furnace instead." 
-              - switch.turn_on: w1
-        - logger.log:
-            level: INFO
-            format: "Called for heating." 
+        - script.execute: call_heat_action
+
     supplemental_heating_action:
       then:
-        - switch.turn_off: rev
-        - if:
-            condition:
-              - switch.is_on: comp1
-            then:
-              - switch.turn_off: comp1
-        - switch.turn_on: w1
-        - switch.turn_on: w2
+        - script.execute: call_heat_action
 
     supplemental_cooling_action:
       then:
+        - switch.turn_off: force_furnace_mode
+        - select.set_index:
+            id: heating_level
+            index: 0
         - switch.turn_off: w2
         - switch.turn_off: w1
         - switch.turn_on: rev
         - switch.turn_on: comp1
         - switch.turn_on: comp2
         - logger.log:
-            level: INFO
+            level: DEBUG
             format: "Called for extra cooling." 
               
     fan_only_action:
@@ -535,12 +664,16 @@ climate:
             then:
               - logger.log: 
                   format: Stopping Fan Script.
-                  level: INFO
+                  level: DEBUG
               - script.stop: fan_duty_script
         - logger.log:
-            level: INFO
+            level: DEBUG
             format: "Fan only action called." 
     idle_action:
+      - switch.turn_off: force_furnace_mode
+      - select.set_index:
+          id: heating_level
+          index: 0
       - switch.turn_off: rev
       - switch.turn_off: comp1
       - switch.turn_off: comp2
@@ -562,7 +695,7 @@ climate:
                   format: Skipping fan script is already running!
                   level: INFO
       - logger.log:
-            level: INFO
+            level: DEBUG
             format: "Idle action ran." 
 
     default_preset: Home
