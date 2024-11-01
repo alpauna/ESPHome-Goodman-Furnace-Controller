@@ -43,5 +43,5 @@ Actually, it was way crazy but working from home I am sick of hearing the old co
 - The temp senor as originally installed on system is [here](https://iwae.com/media/manuals/goodman/ot18-60a-installation.pdf).
 - More info on furnace [wires](https://cielowigle.com/blog/thermostat-wiring/).
 - My latest post [here](https://alshowto.com/esp32-s3-climatefurnace-controller/).
-- More to come in the next few weeks as I finalize my boards and schematics in [EasyEDA](https://easyeda.com/).
+- More to come in the next few weeks as I finalize my boards and schematics in [EasyEDA](https://easyeda.com/). [Here](https://oshwlab.com/alpauna/goodman-furnace-controller_2024-10-25) is my OSHLab project for this board. 
 
