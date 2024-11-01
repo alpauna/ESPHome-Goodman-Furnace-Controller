@@ -251,7 +251,7 @@ select:
         - lambda: 
             id(heating_level).publish_state(x);
         - logger.log:
-            level: INFO
+            level: DEBUG
             format: "Heat level changed to: %s"
             args: ["x.c_str()"]
         
@@ -483,8 +483,8 @@ script:
           }
           if(id(user_forced_no_hp).state) // user forced no hp so just ignore HP heating by forcing furnace only mode.
           {
-            ESP_LOGI("heat_action_script", "Setting force mode based on user force no HP. State of heating level: %d or %s force furnace mode %s", id(heating_level).active_index().value(), id(heating_level).state.c_str(), id(force_furnace_mode).state ? "True" : "False");
             id(force_furnace_mode).turn_on();
+            ESP_LOGD("heat_action_script", "Setting force mode based on user force no HP. State of heating level: %d or %s force furnace mode %s", id(heating_level).active_index().value(), id(heating_level).state.c_str(), id(force_furnace_mode).state ? "True" : "False");
           }
           // in heat call always turn off rev valve if on.
           if(id(rev).state){ id(rev).turn_off();}
