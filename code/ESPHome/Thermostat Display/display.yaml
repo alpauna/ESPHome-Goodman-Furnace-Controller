@@ -101,30 +101,27 @@ time:
           - switch.turn_off: switch_antiburn
 
 sensor:
-
-  - platform: htu21d
-    model: htu21d
+  - platform: aht10
+    variant: AHT20
     temperature:
       id: local_temp
-      name: "Thermostat Temperature"
+      name: "Temperature"
       on_value:
         - lvgl.label.update:
             id: lbl_loc_temp
             text:
               format: "%.1f °F"
               args: [ 'celsius_to_fahrenheit(x)' ]
+
     humidity:
+      name: "Humidity"
       id: local_hum
-      name: "Thermostat Humidity"
       on_value:
         - lvgl.label.update:
             id: lbl_loc_hum
             text:
               format: "%.1f %%"
               args: [ 'x' ]
-    heater:
-      id: local_heater
-      name: "Heater"
     update_interval: 30s
 
   - platform: homeassistant
@@ -151,7 +148,7 @@ sensor:
           
   - platform: homeassistant
     id: target_temp_high
-    entity_id: climate.therm_master_thermostat_climate_controller 
+    entity_id: climate.central_thermo_thermostat_climate_controller
     attribute: target_temp_high
     on_value:
       then:
@@ -170,7 +167,7 @@ sensor:
             value: !lambda return x * 10;
   - platform: homeassistant
     id: target_temp_low
-    entity_id: climate.therm_master_thermostat_climate_controller 
+    entity_id: climate.central_thermo_thermostat_climate_controller
     attribute: target_temp_low
     on_value:
       then:
@@ -237,7 +234,7 @@ text:
 text_sensor:
   - platform: homeassistant
     id: therm_cur_mode
-    entity_id: climate.therm_master_thermostat_climate_controller
+    entity_id: climate.central_thermo_thermostat_climate_controller
     filters:
       - map:
           - off -> 0
@@ -264,7 +261,7 @@ text_sensor:
               }
   - platform: homeassistant
     id: current_hvac_action
-    entity_id: climate.therm_master_thermostat_climate_controller
+    entity_id: climate.central_thermo_thermostat_climate_controller
     attribute: hvac_action
     on_value:
       then:
@@ -378,7 +375,7 @@ binary_sensor:
 
   - platform: homeassistant
     id: term_fan_state
-    entity_id: switch.therm_master_fan
+    entity_id: switch.central_thermo_fan
     on_press:
       then:
         - script.execute: 
@@ -399,7 +396,7 @@ binary_sensor:
             brightness: 0%
   - platform: homeassistant
     id: term_demand_state
-    entity_id: switch.therm_master_reversing_valve
+    entity_id: switch.central_thermo_reversing_valve
     on_press:
       then:
         - script.execute: 
@@ -420,7 +417,7 @@ binary_sensor:
             brightness: 0%
   - platform: homeassistant
     id: term_cool1_state
-    entity_id: switch.therm_master_call_compressor
+    entity_id: switch.central_thermo_hp_compressor_low
     on_press:
       then:
         - script.execute: 
@@ -442,7 +439,7 @@ binary_sensor:
         
   - platform: homeassistant
     id: term_cool2_state
-    entity_id: switch.therm_master_call_compressor_2
+    entity_id: switch.central_thermo_hp_compressor_high
     on_press:
       then:
         - script.execute: 
@@ -463,7 +460,7 @@ binary_sensor:
             brightness: 0%
   - platform: homeassistant
     id: term_heat1_state
-    entity_id: switch.therm_master_heat_low
+    entity_id: switch.central_thermo_heat_low
     on_press:
       then:
         - script.execute: 
@@ -484,7 +481,7 @@ binary_sensor:
             brightness: 0%
   - platform: homeassistant
     id: term_heat2_state
-    entity_id: switch.therm_master_heat_high
+    entity_id: switch.central_thermo_full_heat
     on_press:
       then:
         - script.execute: 
@@ -505,7 +502,7 @@ binary_sensor:
             brightness: 0%
   - platform: homeassistant
     id: term_outside_state
-    entity_id: binary_sensor.therm_master_outside_temp_status
+    entity_id: binary_sensor.central_thermo_outside_temp_status
     on_press:
       then:
         - script.execute: 
@@ -526,7 +523,7 @@ binary_sensor:
             brightness: 0%
   - platform: homeassistant
     id: term_defrost_state
-    entity_id: binary_sensor.therm_master_defrost_mode
+    entity_id: binary_sensor.central_thermo_defrost_mode
     on_press:
       then:
         - script.execute: 
@@ -613,7 +610,7 @@ select:
                     target_temp_low: !lambda return id(target_temp_low).state;
                     target_temp_high: !lambda return id(target_temp_high).state;
                     hvac_mode: !lambda return id(climate_current_mode).state;
-                    entity_id: climate.therm_master_thermostat_climate_controller 
+                    entity_id: climate.central_thermo_thermostat_climate_controller 
               
 
 number:
@@ -697,7 +694,7 @@ number:
                   data:
                     target_temp_low: !lambda return x;
                     target_temp_high: !lambda return id(target_temp_high).state;
-                    entity_id: climate.therm_master_thermostat_climate_controller
+                    entity_id: climate.central_thermo_thermostat_climate_controller
               - number.set:
                   id: heat_temp_changed
                   value: 0
@@ -721,7 +718,7 @@ number:
                   data:
                     target_temp_low: !lambda return id(target_temp_low).state;
                     target_temp_high: !lambda return x;
-                    entity_id: climate.therm_master_thermostat_climate_controller 
+                    entity_id: climate.central_thermo_thermostat_climate_controller
               - number.set:
                   id: cool_temp_changed
                   value: 0

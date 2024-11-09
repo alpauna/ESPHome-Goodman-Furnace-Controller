@@ -1,17 +1,12 @@
 esphome:
-  name: therm-master
-  friendly_name: Therm Master
-  on_boot:
-    then:
-      # read the RTC time once when the system boots
-      pcf8563.read_time: pcf8563_time
-
+  name: central-thermo
+  friendly_name: Central Thermo
 
 esp32:
   board: esp32-s3-devkitc-1
   framework:
     type: arduino
-  
+
 # Enable logging
 logger:
   level: INFO
@@ -19,11 +14,11 @@ logger:
 # Enable Home Assistant API
 api:
   encryption:
-    key: !secret therm_master_api_key
+    key: !secret central_thermo_api_key
 
 ota:
   - platform: esphome
-    password: !secret therm_master_ota_pass
+    password: !secret central_thermo_ota_pass
 
 wifi:
   ssid: !secret wifi_ssid
@@ -31,44 +26,13 @@ wifi:
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: "Therm-Master Fallback Hotspot"
-    password: !secret therm_master_ap_pass
-
-captive_portal:
-i2c:
-  sda: GPIO08
-  scl: GPIO09
-  scan: true
-  id: bus_a
-  frequency: 100kHz
-
-web_server:
-  port: 80
-  auth:
-    username: !secret web_server_username
-    password: !secret web_server_password
+    ssid: "Central-Thermo Fallback Hotspot"
+    password: !secret central_thermo_ap_pass
 
 time:
-  - platform: pcf8563
-    id: pcf8563_time
-    timezone: "America/Chicago"
-    address: 0x51
-    update_interval: never
-    on_time:
-      - seconds: 0
-        minutes: 0
-        hours: '*'
-        then:
-          - lambda: |-
-                    ESP_LOGD("lambda", "Time now: %s", id(pcf8563_time).now().strftime("%A %d %B %Y at %I:%M:%S %p").c_str());
-
   - platform: homeassistant
     id: ha_time
     timezone: "America/Chicago"
-    on_time_sync:
-      then:
-        # ... and update the RTC when the synchronization was successful
-        - pcf8563.write_time: pcf8563_time
     on_time:
       - seconds: 0
         minutes: '*'
@@ -83,7 +47,20 @@ time:
                 - number.to_min: check_state_after_min
                 - lambda: |-
                     id(check_fan_idle_script).execute();
-               
+
+captive_portal:
+i2c:
+  sda: GPIO08
+  scl: GPIO09
+  scan: true
+  id: bus_a
+  frequency: 100kHz
+
+web_server:
+  port: 80
+  auth:
+    username: !secret web_server_username
+    password: !secret web_server_password
                     
                     
 
@@ -97,14 +74,14 @@ switch:
 
   - platform: gpio
     pin: GPIO06
-    id: comp1
-    name: "Call Compressor"
+    id: furn_cool_low
+    name: "Furnace Cool Low"
     inverted: False
   
   - platform: gpio
     pin: GPIO07
-    id: comp2
-    name: "Call Compressor 2"
+    id: furn_cool_high
+    name: "Furnace Cool High"
     inverted: False
     
   - platform: gpio
@@ -128,6 +105,16 @@ switch:
     pin: GPIO15
     id: w1
     name: "Heat Low"
+
+  - platform: gpio
+    pin: GPIO17
+    id: comp1
+    name: "HP Compressor Low"
+
+  - platform: gpio
+    pin: GPIO18
+    id: comp2
+    name: "HP Compressor High"
 
   - platform: template
     id: run_fan_on_idle
@@ -274,6 +261,7 @@ binary_sensor:
             then:
               - switch.turn_off: w1
               - switch.turn_off: w2
+              - switch.turn_on: furn_cool_low
               - switch.turn_on: comp1
     on_release:
       then:
@@ -283,6 +271,8 @@ binary_sensor:
             then:
               - switch.turn_off: comp1
               - switch.turn_off: comp2
+              - switch.turn_off: furn_cool_low
+              - switch.turn_off: furn_cool_high
               - switch.turn_on: w1
 
 
@@ -300,6 +290,10 @@ binary_sensor:
             condition:
               - lambda: return id(therm_control1).action == CLIMATE_ACTION_HEATING && id(out_temp_ok_in).state;
             then:
+              - switch.turn_on: comp1
+              - switch.turn_off: comp2
+              - switch.turn_off: furn_cool_low  
+              - switch.turn_off: furn_cool_high
               - switch.turn_on: w1
               - number.increment: 
                   id: in_defrost_mode
@@ -318,7 +312,8 @@ binary_sensor:
             condition: # In heating and warm enough to run HP so turn off w1 if it is on or for some reason defost is shutdown and not in heating mode make sure to kill w1.
               - lambda: return (id(therm_control1).action == CLIMATE_ACTION_HEATING && id(out_temp_ok_in).state && id(w1).state) || (!id(therm_control1) == CLIMATE_ACTION_HEATING && id(w1).state);
             then:
-              - switch.turn_off: w1
+              - lambda: |-
+                    id(check_fan_idle_script).execute();
               - number.decrement: 
                   id: in_defrost_mode
                   cycle: False
@@ -484,7 +479,7 @@ script:
           if(id(user_forced_no_hp).state) // user forced no hp so just ignore HP heating by forcing furnace only mode.
           {
             id(force_furnace_mode).turn_on();
-            ESP_LOGD("heat_action_script", "Setting force mode based on user force no HP. State of heating level: %d or %s force furnace mode %s", id(heating_level).active_index().value(), id(heating_level).state.c_str(), id(force_furnace_mode).state ? "True" : "False");
+            ESP_LOGI("heat_action_script", "Setting force mode based on user force no HP. State of heating level: %d or %s force furnace mode %s", id(heating_level).active_index().value(), id(heating_level).state.c_str(), id(force_furnace_mode).state ? "True" : "False");
           }
           // in heat call always turn off rev valve if on.
           if(id(rev).state){ id(rev).turn_off();}
@@ -517,21 +512,32 @@ script:
               index = 1;
               if(id(w2).state){ id(w2).turn_off();}
               if(id(w1).state){ id(w1).turn_off();}
+              if(id(furn_cool_high).state){id(furn_cool_high).turn_off();}
+              if(!id(furn_cool_low).state){id(furn_cool_low).turn_on();}
               if(id(comp2).state){ id(comp2).turn_off();}
               id(comp1).turn_on();
               auto call = id(heating_level).make_call();
               call.set_index(index);
               call.perform();
             } else if (index == 1) // HP On low and warm enough for HP High so do that.
-            {
-              index = 2;
-              auto call = id(heating_level).make_call();
-              id(comp1).turn_on();
-              id(comp2).turn_on();
-              // set to HP High Heat 
-              call.set_index(index);
-              call.perform();
+            { 
+              if(int(id(in_defrost_mode).state) == 0) // If not in defrost mode move up a level in heat.
+              {
+                index = 2;
+                auto call = id(heating_level).make_call();
+                id(comp1).turn_on();
+                id(comp2).turn_on();
+                if(id(furn_cool_high).state){id(furn_cool_high).turn_off();}
+                if(!id(furn_cool_low).state){id(furn_cool_low).turn_on();}
+                // set to HP High Heat 
+                call.set_index(index);
+                call.perform();
+              }
             } else {
+              if(!id(comp1).state){id(comp1).turn_on();}
+              if(!id(comp2).state){id(comp2).turn_on();}
+              if(id(furn_cool_high).state){id(furn_cool_high).turn_off();}
+              if(!id(furn_cool_low).state){id(furn_cool_low).turn_on();}
               ESP_LOGI("heat_action_script", "HP is giving it all the BTU's she's got captin! Forced to switch to furnace only mode!", index, id(heating_level).state.c_str()); 
               id(force_furnace_mode).turn_on();
             }
@@ -543,12 +549,11 @@ script:
           { // in Furnace temp level right now so turn off all hp if running.
               if(id(comp1).state){ id(comp1).turn_off();}
               if(id(comp2).state){ id(comp2).turn_off();}
+              if(id(furn_cool_high).state){id(furn_cool_high).turn_off();}
+              if(id(furn_cool_low).state){id(furn_cool_low).turn_off();}
 
-              if(index < 3)
-              { // Just handle HP modes as if idle
-                index=0;
-              } 
-              if (index == 0) // Currently idle and too cold for HP so turn on Furnace Heat Low 
+          
+              if (index < 3) // Currently idle and too cold for HP so turn on Furnace Heat Low 
               {
                 index = 3;
                 if(id(w2).state){ id(w2).turn_off();}      
@@ -559,15 +564,19 @@ script:
                 call.perform();
               } else if(index == 3)
               {
-                index = 4;
-                if(!id(w1).state){ id(w1).turn_on();}  
-                id(w2).turn_on();   
-                auto call = id(heating_level).make_call();
-                // set to Furnace 
-                call.set_index(index);
-                call.perform();
+                if(!id(w1).state){ id(w1).turn_on();} 
+                if(int(id(in_defrost_mode).state) == 0) // If not in defrost mode move up a level in heat.
+                {
+                  index = 4;
+                  id(w2).turn_on();   
+                  auto call = id(heating_level).make_call();
+                  // set to Furnace 
+                  call.set_index(index);
+                  call.perform();
+                }
               } else if(index == 4) 
               {
+                if(!id(w2).state){ id(w2).turn_on();}
                 ESP_LOGI("heat_action_script", "She is giving it all the BTU's she's got captin! at state index: %d or %s", index, id(heating_level).state.c_str());
               }
           }
@@ -601,6 +610,8 @@ climate:
     fan_with_heating: True
     off_mode:
       - switch.turn_off: rev
+      - switch.turn_off: furn_cool_low
+      - switch.turn_off: furn_cool_high
       - switch.turn_off: comp1
       - switch.turn_off: comp2
       - switch.turn_off: w2
@@ -624,6 +635,8 @@ climate:
             index: 0
     cool_action:
       then:
+        - switch.turn_on: furn_cool_low
+        - switch.turn_off: furn_cool_high
         - switch.turn_off: w2
         - switch.turn_off: w1
         - switch.turn_off: comp2
@@ -651,6 +664,8 @@ climate:
         - select.set_index:
             id: heating_level
             index: 0
+        - switch.turn_on: furn_cool_low
+        - switch.turn_on: furn_cool_high
         - switch.turn_off: w2
         - switch.turn_off: w1
         - switch.turn_on: rev
@@ -680,6 +695,8 @@ climate:
           id: heating_level
           index: 0
       - switch.turn_off: rev
+      - switch.turn_off: furn_cool_low
+      - switch.turn_off: furn_cool_high
       - switch.turn_off: comp1
       - switch.turn_off: comp2
       - switch.turn_off: w2
@@ -715,4 +732,5 @@ climate:
             cycle: False
           
         
+    
     
