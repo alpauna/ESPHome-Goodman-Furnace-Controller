@@ -164,7 +164,7 @@ sensor:
             value: !lambda return id(target_temp_high).state;
         - lvgl.spinbox.update:
             id: cool_temp
-            value: !lambda return x * 10;
+            value: !lambda return x;
   - platform: homeassistant
     id: target_temp_low
     entity_id: climate.central_thermo_thermostat_climate_controller
@@ -184,7 +184,7 @@ sensor:
             
         - lvgl.spinbox.update:
             id: heat_temp
-            value: !lambda return id(target_temp_low).state * 10;
+            value: !lambda return id(target_temp_low).state;
   - platform: homeassistant
     id: ha_weather_temp
     entity_id: weather.kfsd 
