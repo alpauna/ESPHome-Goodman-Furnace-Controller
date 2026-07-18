@@ -6,6 +6,7 @@ Actually, it was way crazy but working from home I am sick of hearing the old co
  I have a blog on this [here](https://alshowto.com/esp32-s3-climatefurnace-controller/)
  ![Version 1 board](pictures/FurnaceControllerVersion1.jpg)
  ![Version 2 board layout](pictures/FurnaceControllerVersion2Layout.png)
+ ![Thermostat display home page](pictures/FurnaceControllerDisplayHomePage.jpg)
 ## Use Diagram
 ![Goodman Controller Use Diagram](pictures/FurnaceControlVisualUseDiagram.png)
 ## Key Attributes
