@@ -159,7 +159,7 @@ sensor:
         - lvgl.indicator.update:
             id: val_cool
             value: !lambda return id(target_temp_high).state;
-        - lvgl.arc.update:
+        - lvgl.indicator.update:
             id: cooler
             value: !lambda return id(target_temp_high).state;
         - lvgl.spinbox.update:
@@ -178,7 +178,7 @@ sensor:
         - lvgl.indicator.update:
             id: val_heat
             value: !lambda return id(target_temp_low).state;
-        - lvgl.arc.update:
+        - lvgl.indicator.update:
             id: heater
             value: !lambda return id(target_temp_low).state;
             
@@ -279,13 +279,13 @@ text_sensor:
                 call.set_index(index.value());
                 call.perform();
                 ESP_LOGI("main", "'%s' is at index: %d", str_current_state, index.value());
-                return id(climate_state).state.c_str();
+                return id(climate_state).current_option().c_str();
               } else {
                 auto call = id(climate_state).make_call();
                 call.set_index(0);
                 call.perform();
                 ESP_LOGI("main", "'%s' is at index: %d", str_current_state, index.value());
-                return id(climate_state).state.c_str();
+                return id(climate_state).current_option().c_str();
               }  
   - platform: homeassistant
     id: ha_wheather_forcast
@@ -609,7 +609,7 @@ select:
                   data:
                     target_temp_low: !lambda return id(target_temp_low).state;
                     target_temp_high: !lambda return id(target_temp_high).state;
-                    hvac_mode: !lambda return id(climate_current_mode).state;
+                    hvac_mode: !lambda return id(climate_current_mode).current_option().str();
                     entity_id: climate.central_thermo_thermostat_climate_controller 
               
 
@@ -864,12 +864,15 @@ image:
   - file: images/CoolOnly.png
     id: coolIcon
     resize: 50x50
+    type: RGB565
   - file: images/HeatOnly.png
     id: heatIcon
     resize: 50x50
+    type: RGB565
   - file: images/HeatAndCool.png
     id: heatAndCoolIcon
     resize: 50x50
+    type: RGB565
 
 lvgl:
   on_idle:
@@ -1064,7 +1067,7 @@ lvgl:
                         id: heat_temp
                         align: CENTER
                         bg_opa: TRANSP
-                        step: 0.1
+                        selected_digit: 1
                         digits: 3
                         styles: detail_style
                         range_from: 55.0
@@ -1140,7 +1143,7 @@ lvgl:
                     - spinbox:
                         id: cool_temp
                         align: center
-                        step: 0.1
+                        selected_digit: 1
                         digits: 3
                         styles: detail_style
                         range_from: 55.0
@@ -1246,7 +1249,8 @@ lvgl:
                       range_to: 85
                       angle_range: 260 # sets the total angle to 180 = starts mid left and ends mid right
                       ticks:
-                        count: 0
+                        count: 2 # ESPHome now enforces count >= 2; ticks are hidden via width: 0 below instead
+                        width: 0
                       indicators:
                         - line:
                             id: val_needle
@@ -1569,7 +1573,7 @@ lvgl:
                         id: gap_temp
                         align: CENTER
                         bg_opa: TRANSP
-                        step: 0.1
+                        selected_digit: 1
                         digits: 3
                         styles: detail_style
                         range_from: 55.0
