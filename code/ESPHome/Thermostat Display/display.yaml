@@ -133,11 +133,14 @@ sensor:
             text:
               format: "%.1f °F"
               args: [ 'x' ]
-        - script.execute: 
+        - lvgl.indicator.update:
+            id: val_needle
+            value: !lambda return x;
+        - script.execute:
             id: resume_display
             bright_dis: 50
             bright_en: 100
-    
+
   - platform: homeassistant
     id: current_ds_lr_temp
     entity_id: sensor.downstairs_lr_dht_downstairs_livingroom_temperature
@@ -156,11 +159,11 @@ sensor:
             id: resume_display
             bright_dis: 50
             bright_en: 100
-        - lvgl.indicator.update:
-            id: val_cool
+        - lvgl.arc.update:
+            id: cool_arc
             value: !lambda return id(target_temp_high).state;
         - lvgl.indicator.update:
-            id: cooler
+            id: val_cool
             value: !lambda return id(target_temp_high).state;
         - lvgl.spinbox.update:
             id: cool_temp
@@ -175,13 +178,13 @@ sensor:
                   id: resume_display
                   bright_dis: 50
                   bright_en: 100
+        - lvgl.arc.update:
+            id: heat_arc
+            value: !lambda return id(target_temp_low).state;
         - lvgl.indicator.update:
             id: val_heat
             value: !lambda return id(target_temp_low).state;
-        - lvgl.indicator.update:
-            id: heater
-            value: !lambda return id(target_temp_low).state;
-            
+
         - lvgl.spinbox.update:
             id: heat_temp
             value: !lambda return id(target_temp_low).state;
@@ -1238,74 +1241,95 @@ lvgl:
             pad_all: 4
             align: CENTER
             widgets:
-              - meter:
-                  height: 80%
-                  width: 80%
-                  border_width: 0
+              - arc: # shared neutral background track for the whole 55-85 range
+                  id: gauge_track
+                  height: 280
+                  width: 280
+                  align: CENTER
+                  min_value: 55
+                  max_value: 85
+                  start_angle: 135
+                  end_angle: 45
+                  value: 55
+                  adjustable: false
+                  arc_width: 22
+                  arc_color: 0x3A3A3A
+                  indicator:
+                    arc_opa: TRANSP # this arc only exists for its main track; no indicator fill of its own
+              - arc: # heat setpoint gauge: orange fill from the low end (55) up to the heat setpoint
+                  id: heat_arc
+                  height: 280
+                  width: 280
+                  align: CENTER
+                  min_value: 55
+                  max_value: 85
+                  start_angle: 135
+                  end_angle: 45
+                  mode: NORMAL
+                  value: 70
+                  adjustable: false
+                  arc_opa: TRANSP # main hidden so it doesn't paint over the shared track below
+                  indicator:
+                    arc_width: 22
+                    arc_color: 0xFF8C00
+                  knob:
+                    arc_color: 0xFF8C00
+                    bg_color: 0xFF8C00
+              - arc: # cool setpoint gauge: blue fill from the cool setpoint down to the high end (85)
+                  id: cool_arc
+                  height: 280
+                  width: 280
+                  align: CENTER
+                  min_value: 55
+                  max_value: 85
+                  start_angle: 135
+                  end_angle: 45
+                  mode: REVERSE
+                  arc_opa: TRANSP # main hidden so it doesn't paint over heat_arc/gauge_track below
+                  value: 71
+                  adjustable: false
+                  indicator:
+                    arc_width: 22
+                    arc_color: 0x4AA3FF
+                  knob:
+                    arc_color: 0x4AA3FF
+                    bg_color: 0x4AA3FF
+              - meter: # marker lines for heat setpoint, cool setpoint, and current temperature, layered on top of the two arcs
+                  height: 280
+                  width: 280
+                  align: CENTER
                   bg_opa: TRANSP
-                  align: center
+                  border_width: 0
                   scales:
                     - range_from: 55
                       range_to: 85
-                      angle_range: 260 # sets the total angle to 180 = starts mid left and ends mid right
+                      angle_range: 270 # matches the arcs' 135 -> 45 sweep
+                      rotation: 135    # matches the arcs' start_angle
                       ticks:
-                        count: 2 # ESPHome now enforces count >= 2; ticks are hidden via width: 0 below instead
-                        width: 0
+                        count: 2 # ESPHome enforces count >= 2
+                        width: 0 # hidden; this meter exists only for its line indicators
                       indicators:
                         - line:
-                            id: val_needle
-                            width: 4
-                            color: 0xFFFF00
-                            r_mod: 20 # sets line length by this much difference from the scale default radius
-                            value: 72
+                            id: val_heat
+                            color: 0xFFFFFF
+                            width: 3
+                            radial_offset: 105 # starts ~15px inside the arc's inner edge instead of the widget center
+                            length: 40         # reaches to about the arc's outer edge
+                            value: 70
                         - line:
                             id: val_cool
-                            color: 0x0000FF
-                            width: 6
-                            r_mod: 4 # sets line length by this much difference from the scale default radius
-                            value: 72
+                            color: 0xFFFFFF
+                            width: 3
+                            radial_offset: 105
+                            length: 40
+                            value: 71
                         - line:
-                            id: val_heat
-                            color: 0x8A2D52
-                            width: 6
-                            r_mod: 10 # sets line length by this much difference from the scale default radius
+                            id: val_needle
+                            color: 0xFFFF00
+                            width: 4
+                            radial_offset: 105
+                            length: 48 # 8px taller than the heat/cool markers so its tip stays visible even when all three cluster together
                             value: 72
-                        - arc: # first half of the scale background
-                            color: 0xFF44A1
-                            id: heater
-                            r_mod: 10 # radius difference from the scale default radius
-                            width: 31
-                            start_value: 55
-                            end_value: 72
-                            
-                        - arc: # second half of the scale background
-                            color: 0x9BDDFF
-                            id: cooler
-                            r_mod: 10
-                            width: 31
-                            start_value: 72
-                            end_value: 85
-              - arc: # black arc to erase middle part of meter indicator line
-                  height: 190
-                  width: 190
-                  align: center
-                  arc_color: 0x000000
-                  arc_width: 150
-                  start_angle: 0
-                  end_angle: 360
-                  indicator:
-                    arc_width: 150
-                    arc_color: 0x000000
-              - label: # gauge lower and higher range indicators
-                  styles: detail_style
-                  y: 90
-                  x: -95
-                  text: "55"
-              - label:
-                  styles: detail_style
-                  y: 90
-                  x: 95
-                  text: "85"
               - label:  # value label
                   styles: title_style
                   id: current_temp
